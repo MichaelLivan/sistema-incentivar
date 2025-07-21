@@ -673,10 +673,7 @@ export const AdminDashboard: React.FC = () => {
   <p className="text-xs text-gray-500 mt-1">
     Este valor será usado para calcular pagamentos de atendimentos
   </p>
-  {/* 🔍 DEBUG: Mostrar valor atual */}
-  <p className="text-xs text-blue-600 mt-1">
-    Debug: Valor atual = {newATForm.hourly_rate} (tipo: {typeof newATForm.hourly_rate})
-  </p>
+  
 </div>
               </div>
 
