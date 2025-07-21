@@ -1,32 +1,48 @@
-// Utilitários para formatação de dados - VERSÃO MELHORADA
+// Utilitários para formatação de dados - VERSÃO CORRIGIDA
 
 /**
- * Formata horas decimais para formato HH:MM
+ * Formata horas decimais para formato HH:MM - CORRIGIDA
  * @param hours - Horas em formato decimal (ex: 1.5)
  * @returns String no formato "01:30" 
  */
-// ✅ CORRETO: Math.floor para evitar arredondamentos para cima
 export const formatHours = (hours: number): string => {
   if (isNaN(hours) || hours === null || hours === undefined) {
     return '00:00';
   }
   
-  const wholeHours = Math.floor(hours);
-  const minutes = Math.floor((hours - wholeHours) * 60); // ← CORREÇÃO
+  // ✅ CORREÇÃO: Converter para minutos primeiro para evitar problemas de ponto flutuante
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   
   return `${wholeHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 };
 
 /**
- * Formata horas para exibição precisa sem arredondamentos
+ * ✅ NOVA: Soma segura de horas evitando problemas de ponto flutuante
+ * @param hoursArray - Array de horas em formato decimal
+ * @returns Soma total em horas decimais
+ */
+export const sumHoursSafely = (hoursArray: number[]): number => {
+  const totalMinutes = hoursArray.reduce((sum, hours) => {
+    return sum + Math.round((hours || 0) * 60);
+  }, 0);
+  
+  return totalMinutes / 60;
+};
+
+/**
+ * Formata horas para exibição precisa sem arredondamentos - CORRIGIDA
  * @param hours - Horas em formato decimal
  * @returns String formatada "1h45min", "2h", "45min" ou "0h"
  */
 export const formatPreciseHours = (hours: number): string => {
   if (!hours || hours === 0 || isNaN(hours)) return '0h';
   
-  const wholeHours = Math.floor(hours);
-  const minutes = Math.round((hours - wholeHours) * 60);
+  // ✅ CORREÇÃO: Usar totalMinutes para evitar problemas de arredondamento
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   
   if (minutes === 0) {
     return `${wholeHours}h`;
@@ -38,7 +54,7 @@ export const formatPreciseHours = (hours: number): string => {
 };
 
 /**
- * Formata horas para exibição simples (apenas com "h") - MELHORADA
+ * Formata horas para exibição simples (apenas com "h") - CORRIGIDA
  * @param hours - Horas em formato decimal
  * @returns String formatada com "h" no final, sem arredondamentos desnecessários
  */
@@ -47,9 +63,12 @@ export const formatHoursSimple = (hours: number): string => {
     return '0h';
   }
   
-  // Se for número inteiro, mostrar sem decimais
-  if (hours % 1 === 0) {
-    return `${hours}h`;
+  // ✅ CORREÇÃO: Verificar se é número inteiro usando totalMinutes
+  const totalMinutes = Math.round(hours * 60);
+  
+  // Se for número inteiro de horas (minutos = 0)
+  if (totalMinutes % 60 === 0) {
+    return `${Math.floor(totalMinutes / 60)}h`;
   }
   
   // Se tem decimais, usar formatação precisa
@@ -75,6 +94,7 @@ export const parseTimeInputToDecimal = (timeString: string): number => {
     if (minutes >= 60) return 0;
     if (hours < 0 || minutes < 0) return 0;
     
+    // ✅ CORREÇÃO: Usar divisão precisa
     return hours + (minutes / 60);
   }
   
@@ -83,15 +103,17 @@ export const parseTimeInputToDecimal = (timeString: string): number => {
 };
 
 /**
- * Converte horas decimais para formato H:MM para inputs
+ * Converte horas decimais para formato H:MM para inputs - CORRIGIDA
  * @param hours - Horas em formato decimal
  * @returns String no formato "6:45"
  */
 export const formatDecimalToTimeInput = (hours: number): string => {
   if (!hours || hours === 0 || isNaN(hours)) return '';
   
-  const wholeHours = Math.floor(hours);
-  const minutes = Math.round((hours - wholeHours) * 60);
+  // ✅ CORREÇÃO: Usar totalMinutes
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   
   return `${wholeHours}:${minutes.toString().padStart(2, '0')}`;
 };
@@ -116,15 +138,17 @@ export const parseTimeToHours = (timeString: string): number => {
 };
 
 /**
- * Converte horas decimais para formato HH:MM para inputs de time HTML
+ * Converte horas decimais para formato HH:MM para inputs de time HTML - CORRIGIDA
  * @param hours - Horas em formato decimal
  * @returns String no formato "HH:MM"
  */
 export const hoursToTimeInput = (hours: number): string => {
   if (!hours || hours === 0) return '00:00';
   
-  const wholeHours = Math.floor(hours);
-  const minutes = Math.round((hours - wholeHours) * 60);
+  // ✅ CORREÇÃO: Usar totalMinutes
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
   
   return `${wholeHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 };
@@ -173,7 +197,7 @@ export const formatCurrencySimple = (value: number): string => {
 };
 
 /**
- * Função para garantir valores numéricos válidos - MELHORADA
+ * Função para garantir valores numéricos válidos
  * @param value - Qualquer valor
  * @returns Número válido ou 0
  */
@@ -184,7 +208,7 @@ export const safeNumber = (value: any): number => {
 };
 
 /**
- * Calcula horas entre dois horários - VERSÃO PRECISA
+ * Calcula horas entre dois horários - VERSÃO PRECISA CORRIGIDA
  * @param startTime - Horário inicial "HH:MM"
  * @param endTime - Horário final "HH:MM"
  * @returns Horas decimais precisas
@@ -209,6 +233,7 @@ export const calculateHours = (startTime: string, endTime: string): number => {
     diffMinutes += 24 * 60; // Adicionar 24 horas
   }
   
+  // ✅ CORREÇÃO: Retornar sempre valor preciso em decimais
   return Math.max(0, diffMinutes / 60);
 };
 
@@ -245,7 +270,7 @@ export const isValidTimeFormat = (timeString: string): boolean => {
 };
 
 /**
- * Adiciona horas a um horário específico
+ * Adiciona horas a um horário específico - CORRIGIDA
  * @param baseTime - Horário base "HH:MM"
  * @param hoursToAdd - Horas decimais para adicionar
  * @returns Novo horário "HH:MM"
@@ -254,10 +279,49 @@ export const addHoursToTime = (baseTime: string, hoursToAdd: number): string => 
   if (!baseTime || !isValidTimeFormat(baseTime) || !hoursToAdd) return baseTime;
   
   const [hours, minutes] = baseTime.split(':').map(Number);
-  const totalMinutes = (hours * 60) + minutes + Math.round(hoursToAdd * 60);
+  const baseMinutes = (hours * 60) + minutes;
+  const addMinutes = Math.round(hoursToAdd * 60);
+  const totalMinutes = baseMinutes + addMinutes;
   
   const newHours = Math.floor(totalMinutes / 60) % 24;
   const newMinutes = totalMinutes % 60;
   
   return `${newHours.toString().padStart(2, '0')}:${newMinutes.toString().padStart(2, '0')}`;
+};
+
+/**
+ * ✅ NOVA: Converte minutos para horas decimais
+ * @param minutes - Total de minutos
+ * @returns Horas em formato decimal
+ */
+export const minutesToHours = (minutes: number): number => {
+  if (!minutes || minutes === 0 || isNaN(minutes)) return 0;
+  return minutes / 60;
+};
+
+/**
+ * ✅ NOVA: Converte horas decimais para minutos
+ * @param hours - Horas em formato decimal
+ * @returns Total de minutos
+ */
+export const hoursToMinutes = (hours: number): number => {
+  if (!hours || hours === 0 || isNaN(hours)) return 0;
+  return Math.round(hours * 60);
+};
+
+/**
+ * ✅ NOVA: Formata horas com máxima precisão (para debugging)
+ * @param hours - Horas em formato decimal
+ * @returns String detalhada com minutos exatos
+ */
+export const formatHoursDebug = (hours: number): string => {
+  if (isNaN(hours) || hours === null || hours === undefined) {
+    return '0h0min (0.00)';
+  }
+  
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  
+  return `${wholeHours}h${minutes}min (${hours.toFixed(4)})`;
 };
