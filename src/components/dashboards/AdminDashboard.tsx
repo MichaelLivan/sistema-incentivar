@@ -661,7 +661,8 @@ const hourlyAlerts = sectorPatients.map(patient => {
                   </Select>
                 </div>
 
-                <div>
+                
+<div>
   <label className="block text-sm font-semibold text-purple-800 mb-2">
     Valor por Hora de Atendimento (R$)
   </label>
@@ -676,7 +677,7 @@ const hourlyAlerts = sectorPatients.map(patient => {
   />
   <p className="text-xs text-gray-500 mt-1">
     Este valor será usado para calcular pagamentos de atendimentos
-  
+  </p>
 </div>
               </div>
 
@@ -772,14 +773,14 @@ const hourlyAlerts = sectorPatients.map(patient => {
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
                     Nome Completo do Paciente *
                   </label>
-                  <Input
-                    name="name"
-                    value={newPatientForm.name}
-                    onChange={handlePatientInputChange}
-                    placeholder="Nome completo do paciente"
-                    required
-                  />
-                </div>
+            <Input
+  name="name"
+  value={newPatientForm.name}
+  onChange={handlePatientInputChange}
+  placeholder="Nome completo do paciente"
+  required
+/>
+</div>
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
@@ -810,19 +811,22 @@ const hourlyAlerts = sectorPatients.map(patient => {
                   </Select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Carga Horária Semanal *
-                  </label>
-                  <Input
-                    type="time"
-                    name="weeklyHours"
-                    value={hoursToTimeInput(newPatientForm.weeklyHours)}
-                    onChange={handleTimeInputChange}
-                    required
-                  />
-                 
-                </div>
+                
+                 <div>
+  <label className="block text-sm font-semibold text-purple-800 mb-2">
+    Carga Horária Semanal *
+  </label>
+  <Input
+    type="time"
+    name="weeklyHours"
+    value={hoursToTimeInput(newPatientForm.weeklyHours)}
+    onChange={handleTimeInputChange}
+    required
+  />
+  <p className="text-xs text-gray-500 mt-1">
+    Formato: 06:45 para 6 horas e 45 minutos
+  </p>
+</div>
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
