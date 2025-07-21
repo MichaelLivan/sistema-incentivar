@@ -14,6 +14,11 @@ const __dirname = dirname(__filename);
 // Load environment variables from project root
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
+// Verificação de debug
+console.log('🚀 Starting server...');
+console.log('📂 __dirname:', __dirname);
+console.log('🔑 JWT_SECRET:', process.env.JWT_SECRET ? 'OK' : 'MISSING');
+
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import patientRoutes from './routes/patients.js';
@@ -32,7 +37,16 @@ console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'Configured' : 'Missing'
 console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Configured' : 'Missing');
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -57,22 +71,47 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
 
-// Routes
+// Servir arquivos estáticos do build do React (EM PRODUÇÃO)
+if (process.env.NODE_ENV === 'production') {
+  console.log('🌐 Serving React build from dist folder...');
+  
+  // Servir arquivos estáticos da pasta dist
+  app.use(express.static(join(__dirname, '..', 'dist')));
+  
+  console.log('📁 Static files path:', join(__dirname, '..', 'dist'));
+}
+
+// API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/supervisions', supervisionRoutes);
-app.use('/api/settings', settingsRoutes); // NOVA LINHA: rota para configurações
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    frontend: process.env.NODE_ENV === 'production' ? 'Serving from dist' : 'Development mode'
   });
 });
+
+// React Router - Catch all handler (DEVE VIR DEPOIS DAS ROTAS DA API)
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    // Não interceptar rotas da API
+    if (req.path.startsWith('/api')) {
+      return res.status(404).json({ message: 'API route not found' });
+    }
+    
+    // Servir index.html para todas as outras rotas (React Router)
+    console.log('📄 Serving React app for route:', req.path);
+    res.sendFile(join(__dirname, '..', 'dist', 'index.html'));
+  });
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -83,13 +122,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ message: 'Route not found' });
-});
+// 404 handler para desenvolvimento
+if (process.env.NODE_ENV !== 'production') {
+  app.use('*', (req, res) => {
+    res.status(404).json({ message: 'Route not found' });
+  });
+}
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`💊 Health check: http://localhost:${PORT}/api/health`);
+  
+  if (process.env.NODE_ENV === 'production') {
+    console.log('📱 Frontend: Serving React build');
+    console.log('🔗 App URL: http://localhost:${PORT}');
+  } else {
+    console.log('🛠️ Development mode - Frontend served separately');
+  }
 });
