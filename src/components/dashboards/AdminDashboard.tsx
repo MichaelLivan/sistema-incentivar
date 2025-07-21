@@ -477,12 +477,17 @@ export const AdminDashboard: React.FC = () => {
     currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
     currentWeekEnd.setHours(23, 59, 59, 999);
     
-    const currentWeekHours = patientSessions
-      .filter(s => {
-        const sessionDate = new Date(s.date);
-        return sessionDate >= currentWeekStart && sessionDate <= currentWeekEnd;
-      })
-      .reduce((sum, s) => sum + (Number(s.hours) || 0), 0);
+    // ✅ CORRETO: Converter para minutos, somar, depois converter de volta
+const currentWeekHours = patientSessions
+  .filter(s => {
+    const sessionDate = new Date(s.date);
+    return sessionDate >= currentWeekStart && sessionDate <= currentWeekEnd;
+  })
+  .reduce((sum, s) => {
+    const hours = Number(s.hours) || 0;
+    const minutes = Math.round(hours * 60); // Converter para minutos
+    return sum + minutes;
+  }, 0) / 60; // Converter de volta para horas
     
     const maxWeekHours = Number(patient.weekly_hours) || 0;
     const tolerance = maxWeekHours * 0.1;
@@ -672,7 +677,6 @@ export const AdminDashboard: React.FC = () => {
   />
   <p className="text-xs text-gray-500 mt-1">
     Este valor será usado para calcular pagamentos de atendimentos
-  </p>
   
 </div>
               </div>
@@ -818,7 +822,7 @@ export const AdminDashboard: React.FC = () => {
                     onChange={handleTimeInputChange}
                     required
                   />
-                
+                 
                 </div>
 
                 <div>
