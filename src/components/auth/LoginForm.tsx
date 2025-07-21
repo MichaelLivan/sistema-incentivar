@@ -78,7 +78,7 @@ export const LoginForm: React.FC = () => {
         <CardHeader className="text-center">
           <div className="mb-4">
             <img 
-              src="src/public/logo.jpg" 
+              src="public/logo.jpg" 
               alt="Logo Clínica Incentivar" 
               className="mx-auto w-24 h-24 rounded-lg border-2 border-teal-600 shadow-lg"
             />
