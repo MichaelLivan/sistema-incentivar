@@ -818,9 +818,7 @@ export const AdminDashboard: React.FC = () => {
                     onChange={handleTimeInputChange}
                     required
                   />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Formato: 06:45 para 6 horas e 45 minutos
-                  </p>
+                
                 </div>
 
                 <div>
