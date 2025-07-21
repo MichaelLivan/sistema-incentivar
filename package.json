@@ -9,6 +9,7 @@
     "client": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
+    "start": "node server/index.js",
     "lint": "eslint ."
   },
   "dependencies": {

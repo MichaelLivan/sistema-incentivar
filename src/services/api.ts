@@ -1,4 +1,11 @@
-const API_BASE_URL = 'http://localhost:5173/api'; // URL correta do seu backend
+const API_BASE_URL = (() => {
+  // Em produção, usar a URL do Railway
+  if (import.meta.env.PROD) {
+    return import.meta.env.VITE_API_URL || 'https://sistema-incentivar-production.up.railway.app/api';
+  }
+  // Em desenvolvimento, usar localhost na porta correta do backend (3001)
+  return 'http://localhost:3001/api';
+})();
 
 class ApiService {
   private getAuthHeaders(): Record<string, string> {
