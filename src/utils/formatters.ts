@@ -5,13 +5,14 @@
  * @param hours - Horas em formato decimal (ex: 1.5)
  * @returns String no formato "01:30" 
  */
+// ✅ CORRETO: Math.floor para evitar arredondamentos para cima
 export const formatHours = (hours: number): string => {
   if (isNaN(hours) || hours === null || hours === undefined) {
     return '00:00';
   }
   
   const wholeHours = Math.floor(hours);
-  const minutes = Math.round((hours - wholeHours) * 60);
+  const minutes = Math.floor((hours - wholeHours) * 60); // ← CORREÇÃO
   
   return `${wholeHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 };
