@@ -4,6 +4,26 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// ✅ FUNÇÃO CORRIGIDA para calcular horas com precisão
+const calculatePreciseHours = (startTime, endTime) => {
+  if (!startTime || !endTime) return 0;
+  
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const [endHour, endMin] = endTime.split(':').map(Number);
+  
+  if (isNaN(startHour) || isNaN(startMin) || isNaN(endHour) || isNaN(endMin)) return 0;
+  if (startMin >= 60 || endMin >= 60) return 0;
+  
+  const startMinutes = startHour * 60 + startMin;
+  const endMinutes = endHour * 60 + endMin;
+  
+  let diffMinutes = endMinutes - startMinutes;
+  if (diffMinutes < 0) diffMinutes += 24 * 60; // Para horários overnight
+  
+  // ✅ RETORNAR VALOR EXATO SEM ARREDONDAMENTO
+  return Math.max(0, diffMinutes / 60);
+};
+
 // Listar sessões
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -75,39 +95,70 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(500).json({ message: 'Erro ao buscar sessões' });
     }
 
+    // ✅ LOG para debug (pode remover depois)
+    sessions?.slice(0, 3).forEach((session, i) => {
+      console.log(`🔍 Sessão ${i + 1}:`, {
+        id: session.id,
+        horarios: `${session.start_time} - ${session.end_time}`,
+        hours_stored: session.hours,
+        hours_recalc: calculatePreciseHours(session.start_time, session.end_time)
+      });
+    });
+
     res.json(sessions);
   } catch (error) {
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });
 
-// Criar sessão
+// ✅ CRIAR SESSÃO - VERSÃO CORRIGIDA
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { patient_id, start_time, end_time, date, observations, is_substitution } = req.body;
+
+    console.log('📤 Criando sessão:', {
+      patient_id, start_time, end_time, date, is_substitution
+    });
 
     if (!patient_id || !start_time || !end_time || !date) {
       return res.status(400).json({ message: 'Preencha todos os campos obrigatórios' });
     }
 
-    const startMinutes = parseInt(start_time.split(':')[0]) * 60 + parseInt(start_time.split(':')[1]);
-    const endMinutes = parseInt(end_time.split(':')[0]) * 60 + parseInt(end_time.split(':')[1]);
-    let hours = (endMinutes - startMinutes) / 60;
-    hours = Math.round(hours * 2) / 2;
+    // ✅ USAR FUNÇÃO CORRIGIDA - SEM ARREDONDAMENTO!
+    const hours = calculatePreciseHours(start_time, end_time);
+    
+    console.log(`✅ Horas calculadas com precisão: ${hours} (${typeof hours})`);
 
     if (hours <= 0) {
       return res.status(400).json({ message: 'Hora final deve ser posterior à inicial' });
+    }
+
+    // Determinar AT ID (para substituições)
+    let atId = req.user.id;
+    
+    if (is_substitution) {
+      // Para substituição, buscar o AT original do paciente
+      const { data: patient, error: patientError } = await supabase
+        .from('patients')
+        .select('at_id')
+        .eq('id', patient_id)
+        .single();
+
+      if (!patientError && patient?.at_id) {
+        atId = patient.at_id;
+        console.log(`🔄 Substituição - AT original: ${atId}`);
+      }
     }
 
     const { data: newSession, error } = await supabase
       .from('sessions')
       .insert({
         patient_id,
-        at_id: req.user.id,
+        at_id: atId,  // ✅ Usar AT correto
         start_time,
         end_time,
         date,
-        hours,
+        hours, // ✅ USAR VALOR PRECISO SEM ARREDONDAMENTO!
         observations: observations || '',
         is_substitution: is_substitution || false
       })
@@ -115,14 +166,18 @@ router.post('/', authenticateToken, async (req, res) => {
       .single();
 
     if (error) {
+      console.error('❌ Erro ao criar sessão:', error);
       return res.status(500).json({ message: 'Erro ao cadastrar sessão' });
     }
+
+    console.log(`✅ Sessão criada - ID: ${newSession.id}, Horas: ${newSession.hours}`);
 
     res.status(201).json({
       message: 'Sessão cadastrada com sucesso',
       sessionId: newSession.id
     });
   } catch (error) {
+    console.error('❌ Erro interno:', error);
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });
