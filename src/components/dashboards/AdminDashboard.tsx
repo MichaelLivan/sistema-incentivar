@@ -31,6 +31,43 @@ interface NewPatientForm {
   assignedATId: string;
 }
 
+// ✅ CORREÇÃO: Função para garantir precisão nas horas das sessões
+const formatSessionHours = (hours: number | string): string => {
+  const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+  
+  if (isNaN(numHours) || numHours === null || numHours === undefined) {
+    return '00:00';
+  }
+  
+  // Usar Math.round para evitar problemas de ponto flutuante
+  const totalMinutes = Math.round(numHours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  
+  return `${wholeHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+};
+
+// ✅ CORREÇÃO: Função para formatar horas decimais com mais precisão
+const formatPreciseDecimalHours = (hours: number | string): string => {
+  const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+  
+  if (isNaN(numHours) || numHours === null || numHours === undefined) {
+    return '0h';
+  }
+  
+  const totalMinutes = Math.round(numHours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  
+  if (minutes === 0) {
+    return `${wholeHours}h`;
+  } else if (wholeHours === 0) {
+    return `${minutes}min`;
+  } else {
+    return `${wholeHours}h${minutes}min`;
+  }
+};
+
 export const AdminDashboard: React.FC = () => {
   const { user } = useAuth();
   const [patients, setPatients] = useState<any[]>([]);
@@ -73,6 +110,21 @@ export const AdminDashboard: React.FC = () => {
           apiService.getSessions(),
           apiService.getATs()
         ]);
+        
+        // ✅ CORREÇÃO: Log para verificar os dados das sessões
+        console.log('🔍 Dados das sessões carregadas:', sessionsData);
+        sessionsData.forEach((session, index) => {
+          if (index < 5) { // Log apenas as primeiras 5 para não poluir
+            console.log(`📊 Sessão ${index + 1}:`, {
+              id: session.id,
+              patient_id: session.patient_id,
+              hours: session.hours,
+              hours_type: typeof session.hours,
+              formatted: formatSessionHours(session.hours)
+            });
+          }
+        });
+        
         setPatients(patientsData);
         setSessions(sessionsData);
         setAts(atsData);
@@ -577,12 +629,12 @@ export const AdminDashboard: React.FC = () => {
                     <div>
                       <h4 className="font-medium text-red-800">{alert.patient.name}</h4>
                       <p className="text-sm text-red-600">
-                        Horas da semana: {formatHours(alert.currentWeekHours)}h / {formatHours(alert.maxWeekHours)}h
+                        Horas da semana: {formatPreciseDecimalHours(alert.currentWeekHours)} / {formatPreciseDecimalHours(alert.maxWeekHours)}
                       </p>
                     </div>
                     <div className="text-right">
                       <span className="text-red-600 font-bold">
-                        Excesso: {formatHours(alert.excess)}h
+                        Excesso: {formatPreciseDecimalHours(alert.excess)}
                       </span>
                     </div>
                   </div>
@@ -951,7 +1003,7 @@ export const AdminDashboard: React.FC = () => {
                       <TableCell className="font-medium">{patient.name}</TableCell>
                       <TableCell>{patient.sector.toUpperCase()}</TableCell>
                       <TableCell>{at?.name || 'Não atribuído'}</TableCell>
-                      <TableCell>{formatHours(patient.weekly_hours)}</TableCell>
+                      <TableCell>{formatSessionHours(patient.weekly_hours)}</TableCell>
                       <TableCell>R$ {patient.hourly_rate.toFixed(2)}</TableCell>
                       <TableCell>
                         <div className="flex space-x-2">
@@ -1007,12 +1059,26 @@ export const AdminDashboard: React.FC = () => {
                       const patient = patients.find(p => p.id === session.patient_id);
                       const at = ats.find(a => a.id === session.at_id);
                       
+                      // ✅ CORREÇÃO: Log para debug da sessão específica
+                      console.log(`🔍 Sessão pendente - ID: ${session.id}, Horas raw: ${session.hours} (${typeof session.hours}), Formatada: ${formatSessionHours(session.hours)}`);
+                      
                       return (
                         <TableRow key={session.id}>
                           <TableCell>{patient?.name || 'N/A'}</TableCell>
                           <TableCell>{at?.name || 'N/A'}</TableCell>
                           <TableCell>{formatDateBR(session.date)}</TableCell>
-                          <TableCell>{formatHours(session.hours)}</TableCell>
+                          <TableCell>
+                            <span className="font-mono text-sm">
+                              {/* ✅ CORREÇÃO: Usar função especializada para formatação precisa */}
+                              {formatSessionHours(session.hours)}
+                            </span>
+                            {/* ✅ DEBUG: Mostrar valor raw em desenvolvimento */}
+                            {process.env.NODE_ENV === 'development' && (
+                              <div className="text-xs text-gray-400">
+                                Raw: {session.hours} ({typeof session.hours})
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <div className="max-w-xs truncate" title={session.observations}>
                               {session.observations || 'Sem observações'}
@@ -1075,7 +1141,12 @@ export const AdminDashboard: React.FC = () => {
                           <TableCell>{patient?.name || 'N/A'}</TableCell>
                           <TableCell>{at?.name || 'N/A'}</TableCell>
                           <TableCell>{formatDateBR(session.date)}</TableCell>
-                          <TableCell>{formatHours(session.hours)}</TableCell>
+                          <TableCell>
+                            <span className="font-mono text-sm">
+                              {/* ✅ CORREÇÃO: Usar função especializada para formatação precisa */}
+                              {formatSessionHours(session.hours)}
+                            </span>
+                          </TableCell>
                           <TableCell>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                               session.is_confirmed 
