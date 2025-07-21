@@ -66,7 +66,7 @@ export const Header: React.FC = () => {
           {/* Logo e Título */}
           <div className="flex items-center space-x-2 sm:space-x-3 lg:space-x-4 min-w-0 flex-1">
             <img 
-              src="public/logo.jpg" 
+              src="/logo.jpg" 
               alt="Logo Clínica Incentivar" 
               className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-lg border-2 border-white/30 flex-shrink-0"
             />
