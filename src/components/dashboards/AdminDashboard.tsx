@@ -8,7 +8,8 @@ import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } fro
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { UserPlus, Users, Calendar, AlertTriangle, CheckCircle, X, Edit2, Trash2, Plus } from 'lucide-react';
-import { formatHours, parseTimeToHours, hoursToTimeInput, formatDateBR } from '../../utils/formatters';
+import { formatHours, parseTimeToHours, hoursToTimeInput, formatDateBR, sumHoursSafely } from '../../utils/formatters';
+
 
 interface NewATForm {
   name: string;
@@ -465,29 +466,27 @@ export const AdminDashboard: React.FC = () => {
   const approvedSessions = sectorSessions.filter(s => s.is_approved && !s.is_launched);
 
   // Verificar alertas de carga horária
-  const hourlyAlerts = sectorPatients.map(patient => {
-    const patientSessions = sectorSessions.filter(s => s.patient_id === patient.id);
-    
-    const today = new Date();
-    const currentWeekStart = new Date(today);
-    currentWeekStart.setDate(today.getDate() - today.getDay());
-    currentWeekStart.setHours(0, 0, 0, 0);
-    
-    const currentWeekEnd = new Date(currentWeekStart);
-    currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
-    currentWeekEnd.setHours(23, 59, 59, 999);
-    
-    // ✅ CORRETO: Converter para minutos, somar, depois converter de volta
-const currentWeekHours = patientSessions
-  .filter(s => {
-    const sessionDate = new Date(s.date);
-    return sessionDate >= currentWeekStart && sessionDate <= currentWeekEnd;
-  })
-  .reduce((sum, s) => {
-    const hours = Number(s.hours) || 0;
-    const minutes = Math.round(hours * 60); // Converter para minutos
-    return sum + minutes;
-  }, 0) / 60; // Converter de volta para horas
+const hourlyAlerts = sectorPatients.map(patient => {
+  const patientSessions = sectorSessions.filter(s => s.patient_id === patient.id);
+  
+  const today = new Date();
+  const currentWeekStart = new Date(today);
+  currentWeekStart.setDate(today.getDate() - today.getDay());
+  currentWeekStart.setHours(0, 0, 0, 0);
+  
+  const currentWeekEnd = new Date(currentWeekStart);
+  currentWeekEnd.setDate(currentWeekStart.getDate() + 6);
+  currentWeekEnd.setHours(23, 59, 59, 999);
+  
+  // ✅ SUBSTITUIR POR ESTA VERSÃO CORRIGIDA:
+  const currentWeekHours = sumHoursSafely(
+    patientSessions
+      .filter(s => {
+        const sessionDate = new Date(s.date);
+        return sessionDate >= currentWeekStart && sessionDate <= currentWeekEnd;
+      })
+      .map(s => Number(s.hours) || 0)
+  );
     
     const maxWeekHours = Number(patient.weekly_hours) || 0;
     const tolerance = maxWeekHours * 0.1;
