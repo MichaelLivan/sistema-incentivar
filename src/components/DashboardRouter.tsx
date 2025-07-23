@@ -67,12 +67,12 @@ export const DashboardRouter: React.FC = () => {
         console.log('💰 [DASHBOARD ROUTER] Redirecionando para FinanceiroDashboard (PCT)');
         return <FinanceiroDashboard />;
       
-      // Administradores de Setor (incluindo recepção)
+      // Administradores de Setor (Recepção)
       case 'adm-aba':
       case 'adm-denver':
       case 'adm-grupo':
       case 'adm-escolar':
-        console.log('⚙️ [DASHBOARD ROUTER] Redirecionando para AdminDashboard (Admin + Recepção)');
+        console.log('⚙️ [DASHBOARD ROUTER] Redirecionando para AdminDashboard (Recepção)');
         return <AdminDashboard />;
       
       // Administrador Geral
