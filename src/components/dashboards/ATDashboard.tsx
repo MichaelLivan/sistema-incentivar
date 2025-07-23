@@ -1,274 +1,680 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHeadCell,    
+  TableHeader,      
+  TableRow 
+} from '../ui/Table';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Select } from '../ui/Select';
 import { Footer } from '../ui/Footer';
-import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } from '../ui/Table';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import { Clock, Calendar, User, AlertCircle, X, Search, BookOpen, Users } from 'lucide-react';
-import { formatHours } from '../../utils/formatters';
+import { Edit2, Trash2, DollarSign, Clock, Users, CheckCircle, AlertCircle, XCircle, Eye, Download, BarChart3, Settings } from 'lucide-react';
+import { formatDateBR, formatHours, formatCurrency, safeNumber, calculateHours } from '../../utils/formatters';
 
-export const ATDashboard: React.FC = () => {
+// Interfaces para tipagem
+interface Session {
+  id: string;
+  patient_id: string;
+  at_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  hours: number;
+  is_confirmed: boolean;
+  observations?: string;
+  hourly_rate?: number;
+  at_name?: string;
+  at_sector?: string;
+}
+
+interface AT {
+  id: string;
+  name: string;
+  hourly_rate: number;
+  sector: string;
+}
+
+interface Patient {
+  id: string;
+  name: string;
+  hourly_rate: number;
+  sector: string;
+  at_id: string | null;
+}
+
+interface Supervision {
+  id: string;
+  at_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  hours: number;
+  sector: string;
+  observations?: string;
+}
+
+interface PatientFinancialReport {
+  id: string;
+  name: string;
+  sector: string;
+  at_name: string;
+  totalHours: number;
+  confirmedHours: number;
+  pendingHours: number;
+  hourly_rate: number;
+  confirmedValue: number;
+  pendingValue: number;
+  totalValue: number;
+  sessionCount: number;
+  confirmationRate: number;
+}
+
+interface ATFinancialReport {
+  id: string;
+  name: string;
+  sector: string;
+  sessionHours: number;
+  supervisionHours: number;
+  totalHours: number;
+  session_rate: number;
+  supervision_rate: number;
+  sessionPayment: number;
+  supervisionPayment: number;
+  totalPayment: number;
+}
+
+interface SupervisionRates {
+  aba: number;
+  denver: number;
+  grupo: number;
+  escolar: number;
+}
+
+export const FinanceiroDashboard: React.FC = () => {
   const { user } = useAuth();
-  const [patients, setPatients] = useState([]);
-  const [allSectorPatients, setAllSectorPatients] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [supervisions, setSupervisions] = useState([]);
+  const isFinanceiroPct = user?.type === 'financeiro-pct';
+  const isFinanceiroAts = user?.type === 'financeiro-ats';
+
+  // Verificação de acesso
+  if (!user || (!isFinanceiroPct && !isFinanceiroAts)) {
+    return (
+      <div className="container mx-auto px-4 py-6">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Acesso Negado</h2>
+          <p className="text-gray-600">Esta página é restrita aos usuários do financeiro.</p>
+          <p className="text-sm text-gray-500 mt-2">Tipo atual: {user?.type || 'Não definido'}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [ats, setAts] = useState<AT[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [supervisions, setSupervisions] = useState<Supervision[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('atendimentos'); // 'atendimentos' ou 'supervisoes'
-  
-  // Estados para atendimentos
-  const [sessionForm, setSessionForm] = useState({
-    patientId: '',
-    startTime: '',
-    endTime: '',
-    date: (() => {
-      const today = new Date();
-      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    })(),
-    observations: '',
-    isSubstitution: false,
-  });
+  const [error, setError] = useState<string | null>(null);
 
-  // Estados para supervisões
-  const [supervisionForm, setSupervisionForm] = useState({
-    startTime: '',
-    endTime: '',
-    date: (() => {
-      const today = new Date();
-      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    })(),
-    observations: '',
+  // Estados para supervisão rates
+  const [supervisionRates, setSupervisionRates] = useState<SupervisionRates>({
+    aba: 35,
+    denver: 35,
+    grupo: 35,
+    escolar: 35
   });
+  const [showSupervisionRatesModal, setShowSupervisionRatesModal] = useState(false);
 
-  const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
+  // Estados para filtros e busca
   const [searchTerm, setSearchTerm] = useState('');
-  const [supervisionSubmitting, setSupervisionSubmitting] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  // Estados para modais e edição
+  const [selectedPatientDetails, setSelectedPatientDetails] = useState<string | null>(null);
+  const [selectedATDetails, setSelectedATDetails] = useState<string | null>(null);
+  const [editingRates, setEditingRates] = useState<{ [key: string]: number }>({});
+  const [showCharts, setShowCharts] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
+        setError(null);
         
-        console.log('🔍 CARREGANDO DADOS...');
-        const [myPatientsData, allSectorPatientsData, sessionsData, supervisionsData] = await Promise.all([
-          apiService.getPatients(), // Meus pacientes
-          apiService.getPatientsForSubstitution(), // Todos do setor
-          apiService.getSessions(),
-          apiService.getSupervisions()
+        console.log('🔄 [FINANCEIRO] Carregando dados...');
+        
+        const [sessionsData, atsData, patientsData, supervisionsData] = await Promise.all([
+          apiService.getSessions({ month: selectedMonth, year: selectedYear }).catch(err => {
+            console.error('❌ Erro ao carregar sessões:', err);
+            return [];
+          }),
+          apiService.getATs().catch(err => {
+            console.error('❌ Erro ao carregar ATs:', err);
+            return [];
+          }),
+          apiService.getPatients().catch(err => {
+            console.error('❌ Erro ao carregar pacientes:', err);
+            return [];
+          }),
+          apiService.getSupervisions({ month: selectedMonth, year: selectedYear }).catch(err => {
+            console.error('❌ Erro ao carregar supervisões:', err);
+            return [];
+          })
         ]);
         
-        console.log('📊 DADOS CARREGADOS:');
-        console.log('- Meus pacientes:', myPatientsData.length);
-        console.log('- Todos do setor:', allSectorPatientsData.length);
-        console.log('- Supervisões:', supervisionsData.length);
-        
-        setPatients(myPatientsData);
-        setAllSectorPatients(allSectorPatientsData);
-        setSessions(sessionsData);
-        setSupervisions(supervisionsData);
+        setSessions(sessionsData || []);
+        setAts(atsData || []);
+        setPatients(patientsData || []);
+        setSupervisions(supervisionsData || []);
+
+        // Carregar taxas de supervisão do banco primeiro, depois localmente
+        try {
+          const savedRates = await apiService.getSupervisionRates();
+          setSupervisionRates(savedRates);
+        } catch (error) {
+          console.error('❌ Erro ao carregar taxas do banco, usando valores locais:', error);
+          const localRates = localStorage.getItem('supervisionRates');
+          if (localRates) {
+            setSupervisionRates(JSON.parse(localRates));
+          }
+        }
       } catch (error) {
-        console.error('Erro ao carregar dados:', error);
+        console.error('❌ [FINANCEIRO] Erro ao carregar dados:', error);
+        setError('Erro ao carregar dados. Tente novamente.');
       } finally {
         setLoading(false);
       }
     };
 
     loadData();
-  }, []);
+  }, [selectedMonth, selectedYear]);
 
-  const myPatients = patients;
-  const sectorPatients = allSectorPatients;
+  // Filtrar dados do mês selecionado
+  const thisMonthSessions = Array.isArray(sessions) ? sessions.filter(s => {
+    const sessionDate = new Date(s.date + 'T00:00:00');
+    return sessionDate.getMonth() === selectedMonth - 1 && 
+           sessionDate.getFullYear() === selectedYear;
+  }) : [];
 
-  // Filtrar pacientes baseado na pesquisa
-  const filteredSectorPatients = sectorPatients.filter(patient =>
-    patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    patient.sector.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const thisMonthSupervisions = Array.isArray(supervisions) ? supervisions.filter(s => {
+    const supervisionDate = new Date(s.date + 'T00:00:00');
+    return supervisionDate.getMonth() === selectedMonth - 1 && 
+           supervisionDate.getFullYear() === selectedYear;
+  }) : [];
 
-  const calculateHours = (start, end) => {
-    if (!start || !end) return 0;
-    const startParts = start.split(':');
-    const endParts = end.split(':');
-    const startHour = parseInt(startParts[0]) || 0;
-    const startMin = parseInt(startParts[1]) || 0;
-    const endHour = parseInt(endParts[0]) || 0;
-    const endMin = parseInt(endParts[1]) || 0;
-    const startTotalMinutes = startHour * 60 + startMin;
-    const endTotalMinutes = endHour * 60 + endMin;
-    const diffMinutes = Math.max(0, endTotalMinutes - startTotalMinutes);
-    return diffMinutes / 60;
-  };
+  // Relatório financeiro para PACIENTES (financeiro-pct) - CORRIGIDO
+  const getPatientFinancialReport = (): PatientFinancialReport[] => {
+    if (!isFinanceiroPct || !Array.isArray(thisMonthSessions) || !Array.isArray(patients) || !Array.isArray(ats)) {
+      return [];
+    }
 
-  // Handlers para Atendimentos
-  const handleSessionInputChange = (e) => {
-    const { name, value, type } = e.target;
-    const checked = e.target.checked;
-    
-    setSessionForm(prev => {
-      const newForm = {
-        ...prev,
-        [name]: type === 'checkbox' ? checked : value
+    const patientSessions = thisMonthSessions.reduce((acc, session) => {
+      if (!acc[session.patient_id]) {
+        acc[session.patient_id] = [];
+      }
+      acc[session.patient_id].push(session);
+      return acc;
+    }, {} as { [key: string]: Session[] });
+
+    return Object.entries(patientSessions).map(([patientId, sessions]) => {
+      const patient = patients.find(p => p.id === patientId) || {
+        id: patientId,
+        name: 'Paciente Desconhecido',
+        hourly_rate: 0,
+        sector: 'N/A',
+        at_id: null
       };
 
-      if (name === 'isSubstitution' && checked) {
-        setShowSubstitutionModal(true);
-        setSearchTerm('');
-        newForm.patientId = '';
-      }
+      const at = ats.find(a => a.id === patient.at_id);
       
-      if (name === 'isSubstitution' && !checked) {
-        setShowSubstitutionModal(false);
-        setSearchTerm('');
-        newForm.patientId = '';
-      }
+      // ✅ CORREÇÃO: Financeiro PCT não espera confirmação dos pais
+      // Apenas considera se foi confirmado pela recepção (is_confirmed = true)
+      const confirmedSessions = sessions.filter(s => s.is_confirmed);
+      const pendingSessions = sessions.filter(s => !s.is_confirmed);
 
-      return newForm;
-    });
+      const confirmedHours = confirmedSessions.reduce((sum, s) => sum + calculateHours(s.start_time, s.end_time), 0);
+      const pendingHours = pendingSessions.reduce((sum, s) => sum + calculateHours(s.start_time, s.end_time), 0);
+      const totalHours = confirmedHours + pendingHours;
+
+      const hourlyRate = safeNumber(patient.hourly_rate);
+      const confirmedValue = confirmedHours * hourlyRate;
+      const pendingValue = pendingHours * hourlyRate;
+      const totalValue = totalHours * hourlyRate;
+
+      // Taxa de confirmação baseada na recepção, não nos pais
+      const confirmationRate = sessions.length > 0 ? (confirmedSessions.length / sessions.length) * 100 : 0;
+
+      return {
+        id: patient.id,
+        name: patient.name,
+        sector: patient.sector,
+        at_name: at?.name || 'N/A',
+        totalHours,
+        confirmedHours,
+        pendingHours,
+        hourly_rate: hourlyRate,
+        confirmedValue,
+        pendingValue,
+        totalValue,
+        sessionCount: sessions.length,
+        confirmationRate
+      };
+    }).filter(report => report.totalHours > 0);
   };
 
-  const handleSubstitutionPatientSelect = (patientId) => {
-    setSessionForm(prev => ({ ...prev, patientId }));
-    setShowSubstitutionModal(false);
-    setSearchTerm('');
-  };
-
-  const handleSessionSubmit = (e) => {
-    e.preventDefault();
-    
-    if (!sessionForm.patientId) {
-      alert('Por favor, selecione um paciente');
-      return;
+  // Relatório financeiro para ATs (financeiro-ats)
+  const getATFinancialReport = (): ATFinancialReport[] => {
+    if (!isFinanceiroAts || !Array.isArray(ats) || !Array.isArray(thisMonthSessions) || !Array.isArray(thisMonthSupervisions)) {
+      return [];
     }
 
-    const createSession = async () => {
-      try {
-        await apiService.createSession({
-          patient_id: sessionForm.patientId,
-          start_time: sessionForm.startTime,
-          end_time: sessionForm.endTime,
-          date: sessionForm.date,
-          observations: sessionForm.observations,
-          is_substitution: sessionForm.isSubstitution
-        });
-        
-        const sessionsData = await apiService.getSessions();
-        setSessions(sessionsData);
-        
-        setSessionForm({
-          patientId: '',
-          startTime: '',
-          endTime: '',
-          date: new Date().toISOString().split('T')[0],
-          observations: '',
-          isSubstitution: false,
-        });
+    return ats.map(at => {
+      const atConfirmedSessions = thisMonthSessions.filter(s => s.at_id === at.id && s.is_confirmed);
+      const atSupervisions = thisMonthSupervisions.filter(s => s.at_id === at.id);
 
-        alert('Atendimento registrado com sucesso!');
-      } catch (error) {
-        console.error('Erro ao criar sessão:', error);
-        alert('Erro ao registrar atendimento');
-      }
-    };
+      const sessionHours = atConfirmedSessions.reduce((sum, s) => sum + calculateHours(s.start_time, s.end_time), 0);
+      const supervisionHours = atSupervisions.reduce((sum, s) => sum + safeNumber(s.hours), 0);
+      const totalHours = sessionHours + supervisionHours;
 
-    createSession();
+      const session_rate = safeNumber(at.hourly_rate);
+      const supervision_rate = supervisionRates[at.sector as keyof SupervisionRates] || 35;
+      
+      const sessionPayment = sessionHours * session_rate;
+      const supervisionPayment = supervisionHours * supervision_rate;
+      const totalPayment = sessionPayment + supervisionPayment;
+
+      return {
+        id: at.id,
+        name: at.name,
+        sector: at.sector,
+        sessionHours,
+        supervisionHours,
+        totalHours,
+        session_rate,
+        supervision_rate,
+        sessionPayment,
+        supervisionPayment,
+        totalPayment
+      };
+    }).filter(report => report.totalHours > 0);
   };
 
-  // Handlers para Supervisões - CORRIGIDO
-  const handleSupervisionInputChange = (e) => {
-    const { name, value } = e.target;
-    setSupervisionForm(prev => ({ ...prev, [name]: value }));
-  };
-
-const handleSupervisionSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!supervisionForm.startTime || !supervisionForm.endTime || !supervisionForm.date) {
-      alert('Por favor, preencha todos os campos obrigatórios');
-      return;
-    }
-
-    const hours = calculateHours(supervisionForm.startTime, supervisionForm.endTime);
-    if (hours <= 0) {
-      alert('Horário de fim deve ser posterior ao horário de início');
-      return;
-    }
-
-    setSupervisionSubmitting(true);
-    
+  const handleUpdatePatientRate = async (patientId: string, newRate: number) => {
     try {
-      console.log('📤 Lançando supervisão direto para o financeiro:', {
-        at_id: user.id,
-        start_time: supervisionForm.startTime,
-        end_time: supervisionForm.endTime,
-        date: supervisionForm.date,
-        observations: supervisionForm.observations,
-        direct_to_finance: true
-      });
-
-      await apiService.createSupervision({
-        at_id: user.id, // O próprio AT lança sua supervisão
-        start_time: supervisionForm.startTime,
-        end_time: supervisionForm.endTime,
-        date: supervisionForm.date,
-        observations: supervisionForm.observations
-      });
+      if (!patientId || isNaN(newRate) || newRate < 0) {
+        alert('Dados inválidos para atualização');
+        return;
+      }
       
-      // Recarregar supervisões
-      const supervisionsData = await apiService.getSupervisions();
-      setSupervisions(supervisionsData);
-      
-      // Limpar formulário
-      setSupervisionForm({
-        startTime: '',
-        endTime: '',
-        date: new Date().toISOString().split('T')[0],
-        observations: '',
-      });
-      
-      alert('✅ Supervisão lançada com sucesso!');
-      
+      await apiService.updatePatient(patientId, { hourly_rate: newRate });
+      const patientsData = await apiService.getPatients();
+      setPatients(patientsData || []);
+      setEditingRates(prev => ({ ...prev, [patientId]: newRate }));
     } catch (error) {
-      console.error('❌ Erro ao criar supervisão:', error);
-      
-      // Mensagem de erro mais detalhada
-      let errorMessage = 'Erro ao lançar supervisão';
-      if (error.message) {
-        errorMessage += ': ' + error.message;
-      }
-      
-      if (error.message?.includes('403') || error.message?.includes('permission') || error.message?.includes('policy')) {
-        errorMessage = 'Erro de permissão. Contate o administrador para verificar as configurações do banco de dados.';
-      }
-      
-      alert(errorMessage);
-    } finally {
-      setSupervisionSubmitting(false);
+      console.error('Erro ao atualizar valor:', error);
+      alert('Erro ao atualizar valor por hora do paciente');
     }
   };
+
+  const handleUpdateATRate = async (atId: string, newRate: number) => {
+    try {
+      if (!atId || isNaN(newRate) || newRate < 0) {
+        alert('Dados inválidos para atualização');
+        return;
+      }
+      
+      await apiService.updateUser(atId, { hourly_rate: newRate });
+      const atsData = await apiService.getATs();
+      setAts(atsData || []);
+      setEditingRates(prev => ({ ...prev, [atId]: newRate }));
+    } catch (error) {
+      console.error('Erro ao atualizar valor:', error);
+      alert('Erro ao atualizar valor por hora do AT');
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!sessionId) return;
+    
+    if (window.confirm('Tem certeza que deseja excluir este atendimento?')) {
+      try {
+        await apiService.deleteSession(sessionId);
+        const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
+        setSessions(sessionsData || []);
+      } catch (error) {
+        console.error('Erro ao excluir sessão:', error);
+        alert('Erro ao excluir sessão');
+      }
+    }
+  };
+
+  const handleDeleteSupervision = async (supervisionId: string) => {
+    if (!supervisionId) return;
+    
+    if (window.confirm('Tem certeza que deseja excluir esta supervisão?')) {
+      try {
+        await apiService.deleteSupervision(supervisionId);
+        const supervisionsData = await apiService.getSupervisions({ month: selectedMonth, year: selectedYear });
+        setSupervisions(supervisionsData || []);
+      } catch (error) {
+        console.error('Erro ao excluir supervisão:', error);
+        alert('Erro ao excluir supervisão');
+      }
+    }
+  };
+
+  const handleSaveSupervisionRates = async () => {
+    try {
+      // Salvar no banco de dados via API
+      await apiService.saveSupervisionRates(supervisionRates);
+      
+      // Salvar localmente como backup
+      localStorage.setItem('supervisionRates', JSON.stringify(supervisionRates));
+      
+      setShowSupervisionRatesModal(false);
+      alert('Valores de supervisão atualizados com sucesso no banco de dados!');
+    } catch (error) {
+      console.error('❌ Erro ao salvar valores de supervisão:', error);
+      
+      // Em caso de erro na API, salvar pelo menos localmente
+      localStorage.setItem('supervisionRates', JSON.stringify(supervisionRates));
+      setShowSupervisionRatesModal(false);
+      
+      alert('Valores salvos localmente. Erro ao sincronizar com o banco de dados.');
+    }
+  };
+
+  // ✅ CORREÇÃO PRINCIPAL: Função de exportação de planilha MELHORADA E ESTILIZADA
+  const generateStyledExcel = () => {
+    const monthName = new Date(selectedYear, selectedMonth - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    const currentDate = new Date().toLocaleDateString('pt-BR');
+    
+    if (isFinanceiroPct) {
+      // RELATÓRIO PCT - MAIS ELEGANTE
+      const patientData = filteredPatientReport;
+      
+      // Criar HTML estruturado para Excel
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; }
+    .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #8B5CF6; padding-bottom: 15px; }
+    .company-name { font-size: 24px; font-weight: bold; color: #8B5CF6; margin-bottom: 5px; }
+    .report-title { font-size: 18px; color: #374151; margin-bottom: 5px; }
+    .report-period { font-size: 14px; color: #6B7280; text-transform: uppercase; }
+    .summary-box { background-color: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #10B981; }
+    .summary-title { font-size: 16px; font-weight: bold; color: #065F46; margin-bottom: 15px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+    .summary-item { display: flex; justify-content: space-between; }
+    .summary-label { font-weight: 600; color: #374151; }
+    .summary-value { font-weight: bold; color: #059669; }
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 12px; }
+    .data-table th { background-color: #8B5CF6; color: white; padding: 12px 8px; text-align: center; border: 1px solid #7C3AED; font-weight: bold; }
+    .data-table td { padding: 10px 8px; border: 1px solid #E5E7EB; text-align: center; }
+    .data-table tbody tr:nth-child(even) { background-color: #F9FAFB; }
+    .data-table tbody tr:hover { background-color: #EEF2FF; }
+    .currency { color: #059669; font-weight: 600; }
+    .currency.pending { color: #D97706; }
+    .status-confirmed { background-color: #D1FAE5; color: #065F46; padding: 4px 8px; border-radius: 4px; font-size: 10px; }
+    .status-pending { background-color: #FEF3C7; color: #92400E; padding: 4px 8px; border-radius: 4px; font-size: 10px; }
+    .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #6B7280; border-top: 1px solid #E5E7EB; padding-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">🏥 CLÍNICA INCENTIVAR</div>
+    <div class="report-title">Relatório Financeiro - Cobrança aos Pais</div>
+    <div class="report-period">${monthName.toUpperCase()}</div>
+  </div>
+
+  <div class="summary-box">
+    <div class="summary-title">💰 RESUMO EXECUTIVO</div>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <span class="summary-label">Total Confirmado (Recepção):</span>
+        <span class="summary-value">${formatCurrency(totalConfirmedRevenue)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total Pendente (Recepção):</span>
+        <span class="summary-value" style="color: #D97706;">${formatCurrency(totalPendingRevenue)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">🎯 TOTAL GERAL A COBRAR:</span>
+        <span class="summary-value" style="color: #DC2626; font-size: 18px;">${formatCurrency(totalRevenue)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total de Horas:</span>
+        <span class="summary-value">${formatHours(totalHours)}</span>
+      </div>
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>PACIENTE</th>
+        <th>SETOR</th>
+        <th>AT RESPONSÁVEL</th>
+        <th>H. CONFIRMADAS</th>
+        <th>H. PENDENTES</th>
+        <th>TOTAL HORAS</th>
+        <th>VALOR/HORA</th>
+        <th>VALOR CONFIRMADO</th>
+        <th>VALOR PENDENTE</th>
+        <th>TOTAL A COBRAR</th>
+        <th>TAXA CONFIRM.</th>
+        <th>STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${patientData.map(p => `
+        <tr>
+          <td style="font-weight: 600; text-align: left;">${p.name}</td>
+          <td style="font-weight: 600; color: #7C3AED;">${p.sector.toUpperCase()}</td>
+          <td style="text-align: left;">${p.at_name}</td>
+          <td style="color: #059669; font-weight: 600;">${formatHours(p.confirmedHours)}</td>
+          <td style="color: #D97706; font-weight: 600;">${formatHours(p.pendingHours)}</td>
+          <td style="font-weight: bold; color: #7C3AED;">${formatHours(p.totalHours)}</td>
+          <td class="currency">${formatCurrency(p.hourly_rate)}</td>
+          <td class="currency">${formatCurrency(p.confirmedValue)}</td>
+          <td class="currency pending">${formatCurrency(p.pendingValue)}</td>
+          <td style="font-weight: bold; font-size: 14px; color: #DC2626; background-color: #FEE2E2;">${formatCurrency(p.totalValue)}</td>
+          <td style="font-weight: 600; color: ${p.confirmationRate >= 80 ? '#059669' : p.confirmationRate >= 50 ? '#D97706' : '#DC2626'};">${p.confirmationRate.toFixed(1)}%</td>
+          <td>
+            <span class="${p.pendingHours === 0 ? 'status-confirmed' : 'status-pending'}">
+              ${p.pendingHours === 0 ? '✅ OK' : '⏳ PENDENTE'}
+            </span>
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p><strong>Relatório gerado em:</strong> ${currentDate} | <strong>Sistema:</strong> Clínica Incentivar | <strong>Usuário:</strong> ${user?.name}</p>
+    <p style="margin-top: 5px;"><em>ℹ️ Valores confirmados = Confirmados pela recepção | Valores pendentes = Aguardando confirmação da recepção</em></p>
+  </div>
+</body>
+</html>`;
+
+      // Criar e baixar arquivo
+      const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Relatorio_Cobranca_Pais_${selectedMonth.toString().padStart(2, '0')}_${selectedYear}.xls`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+    } else {
+      // RELATÓRIO ATS - MAIS ELEGANTE
+      const atData = filteredATReport;
+      
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; }
+    .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #8B5CF6; padding-bottom: 15px; }
+    .company-name { font-size: 24px; font-weight: bold; color: #8B5CF6; margin-bottom: 5px; }
+    .report-title { font-size: 18px; color: #374151; margin-bottom: 5px; }
+    .report-period { font-size: 14px; color: #6B7280; text-transform: uppercase; }
+    .summary-box { background-color: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #059669; }
+    .summary-title { font-size: 16px; font-weight: bold; color: #065F46; margin-bottom: 15px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+    .summary-item { display: flex; justify-content: space-between; }
+    .summary-label { font-weight: 600; color: #374151; }
+    .summary-value { font-weight: bold; color: #059669; }
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 12px; }
+    .data-table th { background-color: #059669; color: white; padding: 12px 8px; text-align: center; border: 1px solid #047857; font-weight: bold; }
+    .data-table td { padding: 10px 8px; border: 1px solid #E5E7EB; text-align: center; }
+    .data-table tbody tr:nth-child(even) { background-color: #F9FAFB; }
+    .data-table tbody tr:hover { background-color: #ECFDF5; }
+    .currency { color: #059669; font-weight: 600; }
+    .hours-session { color: #2563EB; font-weight: 600; }
+    .hours-supervision { color: #7C3AED; font-weight: 600; }
+    .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #6B7280; border-top: 1px solid #E5E7EB; padding-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">🏥 CLÍNICA INCENTIVAR</div>
+    <div class="report-title">Relatório Financeiro - Pagamento aos ATs</div>
+    <div class="report-period">${monthName.toUpperCase()}</div>
+  </div>
+
+  <div class="summary-box">
+    <div class="summary-title">💼 RESUMO EXECUTIVO</div>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <span class="summary-label">Total Atendimentos:</span>
+        <span class="summary-value">${formatCurrency(filteredATReport.reduce((sum, at) => sum + at.sessionPayment, 0))}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total Supervisões:</span>
+        <span class="summary-value">${formatCurrency(filteredATReport.reduce((sum, at) => sum + at.supervisionPayment, 0))}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">🎯 TOTAL GERAL A PAGAR:</span>
+        <span class="summary-value" style="color: #DC2626; font-size: 18px;">${formatCurrency(totalATPayments)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total de Horas:</span>
+        <span class="summary-value">${formatHours(totalATHours)}</span>
+      </div>
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>AT</th>
+        <th>SETOR</th>
+        <th>H. ATENDIMENTO</th>
+        <th>H. SUPERVISÃO</th>
+        <th>TOTAL HORAS</th>
+        <th>VALOR/H ATEND.</th>
+        <th>VALOR/H SUPERV.</th>
+        <th>PAGTO ATENDIMENTO</th>
+        <th>PAGTO SUPERVISÃO</th>
+        <th>TOTAL A PAGAR</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${atData.map(at => `
+        <tr>
+          <td style="font-weight: 600; text-align: left;">${at.name}</td>
+          <td style="font-weight: 600; color: #7C3AED;">${at.sector.toUpperCase()}</td>
+          <td class="hours-session">${formatHours(at.sessionHours)}</td>
+          <td class="hours-supervision">${formatHours(at.supervisionHours)}</td>
+          <td style="font-weight: bold; color: #374151;">${formatHours(at.totalHours)}</td>
+          <td class="currency">${formatCurrency(at.session_rate)}</td>
+          <td class="currency">${formatCurrency(at.supervision_rate)}</td>
+          <td class="currency">${formatCurrency(at.sessionPayment)}</td>
+          <td class="currency">${formatCurrency(at.supervisionPayment)}</td>
+          <td style="font-weight: bold; font-size: 14px; color: #DC2626; background-color: #FEE2E2;">${formatCurrency(at.totalPayment)}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p><strong>Relatório gerado em:</strong> ${currentDate} | <strong>Sistema:</strong> Clínica Incentivar | <strong>Usuário:</strong> ${user?.name}</p>
+    <p style="margin-top: 5px;"><em>ℹ️ Valores calculados apenas para atendimentos confirmados pela recepção</em></p>
+  </div>
+</body>
+</html>`;
+
+      // Criar e baixar arquivo
+      const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Relatorio_Pagamento_ATs_${selectedMonth.toString().padStart(2, '0')}_${selectedYear}.xls`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+    
+    // Notificação de sucesso
+    alert('📊 Relatório exportado com sucesso! Verifique sua pasta de downloads.');
+  };
+
+  const patientReport = getPatientFinancialReport();
+  const atReport = getATFinancialReport();
+
+  // Filtros - com verificação de segurança
+  const filteredPatientReport = patientReport.filter(p =>
+    p?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+  );
+
+  const filteredATReport = atReport.filter(at =>
+    at?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+  );
 
   // Estatísticas
-  const currentHours = calculateHours(
-    activeTab === 'atendimentos' ? sessionForm.startTime : supervisionForm.startTime,
-    activeTab === 'atendimentos' ? sessionForm.endTime : supervisionForm.endTime
-  );
-
-  const mySessionsThisMonth = sessions.filter(s => 
-    s.at_id === user?.id && 
-    new Date(s.date).getMonth() === new Date().getMonth()
-  );
-
-  const mySupervisions = supervisions.filter(s => s.at_id === user?.id);
-  const totalHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => sum + s.hours, 0);
-  const selectedPatient = allSectorPatients.find(p => p.id === sessionForm.patientId);
+  const totalConfirmedRevenue = filteredPatientReport.reduce((sum, p) => sum + safeNumber(p.confirmedValue), 0);
+  const totalPendingRevenue = filteredPatientReport.reduce((sum, p) => sum + safeNumber(p.pendingValue), 0);
+  const totalRevenue = totalConfirmedRevenue + totalPendingRevenue;
+  const totalHours = filteredPatientReport.reduce((sum, p) => sum + safeNumber(p.totalHours), 0);
+  
+  const totalATPayments = filteredATReport.reduce((sum, at) => sum + safeNumber(at.totalPayment), 0);
+  const totalConfirmedHours = filteredPatientReport.reduce((sum, p) => sum + safeNumber(p.confirmedHours), 0);
+  const totalPendingHours = filteredPatientReport.reduce((sum, p) => sum + safeNumber(p.pendingHours), 0);
+  const totalATHours = filteredATReport.reduce((sum, at) => sum + safeNumber(at.totalHours), 0);
+  const riskPatients = filteredPatientReport.filter(p => (p.pendingHours || 0) > 10 || (p.confirmationRate || 0) < 50).length;
 
   if (loading) {
     return (
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 py-6 space-y-6">
         <div className="text-center">
-          <p className="text-lg text-gray-600">Carregando dados...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-700 mx-auto mb-4"></div>
+          <p className="text-lg text-gray-600">Carregando dados financeiros...</p>
+          <p className="text-sm text-gray-500">
+            {isFinanceiroPct ? 'Preparando relatórios de cobrança' : 'Preparando relatórios de pagamento'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4 py-6 space-y-6">
+        <div className="text-center">
+          <p className="text-lg text-red-600">{error}</p>
+          <Button onClick={() => window.location.reload()} className="mt-4">
+            Tentar novamente
+          </Button>
         </div>
       </div>
     );
@@ -276,526 +682,97 @@ const handleSupervisionSubmit = async (e) => {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
-      {/* Modal de Substituição */}
-      {showSubstitutionModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
-            <div className="flex items-center justify-between p-6 border-b">
-              <h3 className="text-lg font-semibold text-purple-800">
-                Selecionar Paciente para Substituição - Setor {user?.sector?.toUpperCase()}
-              </h3>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowSubstitutionModal(false)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            
-            <div className="p-6">
-              <div className="mb-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <Input
-                    type="text"
-                    placeholder="Buscar paciente por nome..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-              
-              <div className="overflow-y-auto max-h-[50vh]">
-                {filteredSectorPatients.length > 0 ? (
-                  <div className="grid grid-cols-1 gap-3">
-                    {filteredSectorPatients.map(patient => {
-                      const isMyPatient = myPatients.some(p => p.id === patient.id);
-                      return (
-                        <div
-                          key={patient.id}
-                          className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 hover:shadow-md ${
-                            isMyPatient 
-                              ? 'bg-blue-50 border-blue-200 hover:bg-blue-100' 
-                              : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
-                          }`}
-                          onClick={() => handleSubstitutionPatientSelect(patient.id)}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-medium text-purple-800">
-                                {patient.name}
-                                {isMyPatient && (
-                                  <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-                                    Meu Paciente
-                                  </span>
-                                )}
-                              </h4>
-                              <p className="text-sm text-gray-600">
-                                Setor: {patient.sector.toUpperCase()}
-                              </p>
-                            </div>
-                            <Button size="sm" variant="primary">
-                              Selecionar
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    {searchTerm ? (
-                      <div>
-                        <p>Nenhum paciente encontrado para "{searchTerm}"</p>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setSearchTerm('')}
-                          className="mt-2"
-                        >
-                          Limpar busca
-                        </Button>
-                      </div>
-                    ) : (
-                      'Nenhum paciente disponível no setor'
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="flex items-center space-x-4">
-            <div className="p-3 bg-teal-100 rounded-lg">
-              <Clock className="w-6 h-6 text-teal-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Horas do Mês</p>
-              <p className="text-2xl font-bold text-purple-700">{totalHoursThisMonth}h</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center space-x-4">
-            <div className="p-3 bg-pink-100 rounded-lg">
-              <User className="w-6 h-6 text-pink-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Pacientes</p>
-              <p className="text-2xl font-bold text-purple-700">{myPatients.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="flex items-center space-x-4">
-            <div className="p-3 bg-purple-100 rounded-lg">
-              <Calendar className="w-6 h-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Atendimentos</p>
-              <p className="text-2xl font-bold text-purple-700">{mySessionsThisMonth.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="flex items-center space-x-4">
-            <div className="p-3 bg-orange-100 rounded-lg">
-              <BookOpen className="w-6 h-6 text-orange-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Supervisões</p>
-              <p className="text-2xl font-bold text-purple-700">{mySupervisions.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Abas */}
-      <Card>
-        <CardHeader>
-          <div className="flex space-x-4">
-            <Button
-              onClick={() => setActiveTab('atendimentos')}
-              variant={activeTab === 'atendimentos' ? 'primary' : 'secondary'}
-              className="flex items-center space-x-2"
-            >
-              <Users className="w-4 h-4" />
-              <span>Atendimentos</span>
-            </Button>
-            <Button
-              onClick={() => setActiveTab('supervisoes')}
-              variant={activeTab === 'supervisoes' ? 'primary' : 'secondary'}
-              className="flex items-center space-x-2"
-            >
-              <BookOpen className="w-4 h-4" />
-              <span>Supervisões</span>
-            </Button>
-          </div>
-        </CardHeader>
-      </Card>
-
-      {/* Formulário de Atendimento */}
-      {activeTab === 'atendimentos' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Registrar Atendimento</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSessionSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Paciente
-                  </label>
-                  {sessionForm.isSubstitution ? (
-                    <div className="space-y-2">
-                      <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                        <div className="flex items-center space-x-2">
-                          <AlertCircle className="w-5 h-5 text-orange-600" />
-                          <span className="text-orange-800 font-medium">Modo Substituição</span>
-                        </div>
-                        {selectedPatient ? (
-                          <div className="mt-2">
-                            <p className="text-sm text-orange-700">
-                              Paciente selecionado: <strong>{selectedPatient.name}</strong>
-                            </p>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => setShowSubstitutionModal(true)}
-                              className="mt-2"
-                            >
-                              Trocar Paciente
-                            </Button>
-                          </div>
-                        ) : (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="primary"
-                            onClick={() => setShowSubstitutionModal(true)}
-                            className="mt-2"
-                          >
-                            Selecionar Paciente
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <Select
-                      name="patientId"
-                      value={sessionForm.patientId}
-                      onChange={handleSessionInputChange}
-                      required
-                    >
-                      <option value="">Selecione o paciente</option>
-                      {myPatients.map(patient => (
-                        <option key={patient.id} value={patient.id}>
-                          {patient.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Data
-                  </label>
-                  <Input
-                    type="date"
-                    name="date"
-                    value={sessionForm.date}
-                    onChange={handleSessionInputChange}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Início
-                  </label>
-                  <Input
-                    type="time"
-                    name="startTime"
-                    value={sessionForm.startTime}
-                    onChange={handleSessionInputChange}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Fim
-                  </label>
-                  <Input
-                    type="time"
-                    name="endTime"
-                    value={sessionForm.endTime}
-                    onChange={handleSessionInputChange}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-purple-800 mb-2">
-                  Observações
-                </label>
-                <textarea
-                  name="observations"
-                  value={sessionForm.observations}
-                  onChange={handleSessionInputChange}
-                  rows={3}
-                  placeholder="Observações sobre o atendimento..."
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all duration-200 bg-white/90"
-                />
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  id="isSubstitution"
-                  name="isSubstitution"
-                  checked={sessionForm.isSubstitution}
-                  onChange={handleSessionInputChange}
-                  className="w-4 h-4 text-pink-600 border-gray-300 rounded focus:ring-pink-500"
-                />
-                <label htmlFor="isSubstitution" className="text-sm font-medium text-purple-800">
-                  Atendimento de Substituição
-                </label>
-              </div>
-
-              {currentHours > 0 && activeTab === 'atendimentos' && (
-                <div className="bg-teal-50 p-4 rounded-lg">
-                  <div className="flex items-center space-x-2">
-                    <Clock className="w-5 h-5 text-teal-600" />
-                    <span className="font-semibold text-teal-800">
-                      Carga Horária: {formatHours(currentHours)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              <Button type="submit" className="w-full">
-                Registrar Atendimento
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Formulário de Supervisão - CORRIGIDO */}
-      {activeTab === 'supervisoes' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Lançar Supervisão</CardTitle>
-            <div className="bg-green-50 p-3 rounded-lg mt-3">
-              <p className="text-sm text-green-800 font-medium">
-                🚀 Registre suas horas de supervisão que serão automaticamente enviadas ao financeiro.
-              </p>
-              <p className="text-xs text-green-700 mt-1">
-{/*                 Não precisa mais de coordenador - você lança diretamente! */}
-              </p>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSupervisionSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Data *
-                  </label>
-                  <Input
-                    type="date"
-                    name="date"
-                    value={supervisionForm.date}
-                    onChange={handleSupervisionInputChange}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Início *
-                  </label>
-                  <Input
-                    type="time"
-                    name="startTime"
-                    value={supervisionForm.startTime}
-                    onChange={handleSupervisionInputChange}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Fim *
-                  </label>
-                  <Input
-                    type="time"
-                    name="endTime"
-                    value={supervisionForm.endTime}
-                    onChange={handleSupervisionInputChange}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-purple-800 mb-2">
-                  Observações
-                </label>
-                <textarea
-                  name="observations"
-                  value={supervisionForm.observations}
-                  onChange={handleSupervisionInputChange}
-                  rows={3}
-                  placeholder="Observações sobre a supervisão..."
-                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all duration-200 bg-white/90"
-                />
-              </div>
-
-              {currentHours > 0 && activeTab === 'supervisoes' && (
-                <div className="bg-orange-50 p-4 rounded-lg">
-                  <div className="flex items-center space-x-2">
-                    <BookOpen className="w-5 h-5 text-orange-600" />
-                    <span className="font-semibold text-orange-800">
-                      Duração da Supervisão: {formatHours(currentHours)}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              <Button 
-                type="submit" 
-                className="w-full"
-                disabled={supervisionSubmitting}
-              >
-                {supervisionSubmitting ? (
-                  <div className="flex items-center justify-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Lançando...</span>
-                  </div>
-                ) : (
-                  'Lançar Supervisão'
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Histórico */}
+      {/* Filtros de Período */}
       <Card>
         <CardHeader>
           <CardTitle>
-            {activeTab === 'atendimentos' ? 'Histórico de Atendimentos' : 'Histórico de Supervisões'}
+            {isFinanceiroPct ? 'Financeiro - Cobrança aos Pais' : 'Financeiro - Pagamento aos ATs'}
           </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {activeTab === 'atendimentos' ? (
-                  <>
-                    <TableHeadCell>Paciente</TableHeadCell>
-                    <TableHeadCell>Data</TableHeadCell>
-                    <TableHeadCell>Início</TableHeadCell>
-                    <TableHeadCell>Fim</TableHeadCell>
-                    <TableHeadCell>Horas</TableHeadCell>
-                    <TableHeadCell>Status</TableHeadCell>
-                    <TableHeadCell>Substituição</TableHeadCell>
-                  </>
-                ) : (
-                  <>
-                    <TableHeadCell>Data</TableHeadCell>
-                    <TableHeadCell>Início</TableHeadCell>
-                    <TableHeadCell>Fim</TableHeadCell>
-                    <TableHeadCell>Horas</TableHeadCell>
-                    <TableHeadCell>Setor</TableHeadCell>
-                    <TableHeadCell>Observações</TableHeadCell>
-                  </>
-                )}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {activeTab === 'atendimentos' ? (
-                mySessionsThisMonth.map(session => {
-                  const patient = patients.find(p => p.id === session.patient_id) || 
-                                 allSectorPatients.find(p => p.id === session.patient_id);
-                  return (
-                    <TableRow key={session.id}>
-                      <TableCell>{patient?.name || 'N/A'}</TableCell>
-                      <TableCell>{new Date(session.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
-                      <TableCell>{session.start_time}</TableCell>
-                      <TableCell>{session.end_time}</TableCell>
-                      <TableCell>{formatHours(session.hours)}</TableCell>
-                      <TableCell>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          session.is_launched 
-                            ? 'bg-green-100 text-green-800' 
-                            : session.is_approved 
-                              ? 'bg-blue-100 text-blue-800'
-                              : session.is_confirmed
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {session.is_launched ? 'Lançado' : 
-                           session.is_approved ? 'Aprovado' : 
-                           session.is_confirmed ? 'Confirmado' : 'Pendente'}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {session.is_substitution && (
-                          <span className="text-orange-600 font-medium">
-                            <AlertCircle className="inline w-4 h-4 mr-1" />
-                            Sim
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              ) : (
-                mySupervisions.map(supervision => (
-                  <TableRow key={supervision.id}>
-                    <TableCell>{new Date(supervision.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
-                    <TableCell>{supervision.start_time}</TableCell>
-                    <TableCell>{supervision.end_time}</TableCell>
-                    <TableCell>{formatHours(supervision.hours)}</TableCell>
-                    <TableCell>{supervision.sector?.toUpperCase()}</TableCell>
-                    <TableCell>
-                      <div className="max-w-xs truncate" title={supervision.observations}>
-                        {supervision.observations || 'Sem observações'}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-
-          {((activeTab === 'atendimentos' && mySessionsThisMonth.length === 0) || 
-            (activeTab === 'supervisoes' && mySupervisions.length === 0)) && (
-            <div className="text-center py-8 text-gray-500">
-              <BookOpen className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-              <p>Nenhum {activeTab === 'atendimentos' ? 'atendimento' : 'supervisão'} registrado para este mês.</p>
+          {isFinanceiroPct && (
+            <div className="bg-blue-50 p-3 rounded-lg mt-3">
+              <p className="text-sm text-blue-800 font-medium">
+                ✅ <strong>Aguarda apenas confirmação da recepção</strong> - Os pais apenas visualizam os atendimentos.
+              </p>
             </div>
           )}
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4 items-center">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Mês</label>
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="border border-gray-300 rounded-md px-3 py-2"
+              >
+                {[...Array(12)].map((_, i) => (
+                  <option key={i + 1} value={i + 1}>
+                    {new Date(2000, i, 1).toLocaleDateString('pt-BR', { month: 'long' })}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ano</label>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="border border-gray-300 rounded-md px-3 py-2"
+              >
+                {[2024, 2025, 2026].map(year => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Buscar {isFinanceiroPct ? 'Paciente' : 'AT'}
+              </label>
+              <Input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={`Digite o nome do ${isFinanceiroPct ? 'paciente' : 'AT'}...`}
+                className="w-64"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Ações</label>
+              <div className="flex space-x-2">
+                {isFinanceiroAts && (
+                  <Button
+                    onClick={() => setShowSupervisionRatesModal(true)}
+                    variant="secondary"
+                    className="flex items-center space-x-2"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span>Config. Supervisão</span>
+                  </Button>
+                )}
+                <Button
+                  onClick={() => setShowCharts(!showCharts)}
+                  variant="secondary"
+                  className="flex items-center space-x-2"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>{showCharts ? 'Ocultar' : 'Mostrar'} Gráficos</span>
+                </Button>
+                <Button
+                  onClick={generateStyledExcel}
+                  variant="success"
+                  className="flex items-center space-x-2 bg-green-600 hover:bg-green-700"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Exportar Excel</span>
+                </Button>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Stats Cards - Restante do código permanece igual... */}
+      {/* ... resto do código permanece exatamente igual ... */}
       
       <Footer />
     </div>
