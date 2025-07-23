@@ -153,70 +153,148 @@ export const AdminDashboard: React.FC = () => {
     );
   });
 
-  // ✅ CORREÇÃO PRINCIPAL: Função de confirmação de atendimentos
+ // ✅ CORREÇÃO PRINCIPAL: Função de confirmação de atendimentos MELHORADA
   const handleConfirmSession = async (sessionId: string) => {
     try {
       console.log('✅ [ADMIN] Confirmando sessão:', sessionId);
-      console.log('🔍 Sessão antes da confirmação:', sessions.find(s => s.id === sessionId));
       
-      // Chamar API para confirmar
+      // Obter dados da sessão antes da confirmação para debugging
+      const sessionToConfirm = sessions.find(s => s.id === sessionId);
+      console.log('🔍 Sessão a ser confirmada:', {
+        id: sessionToConfirm?.id,
+        patient_id: sessionToConfirm?.patient_id,
+        at_id: sessionToConfirm?.at_id,
+        is_confirmed: sessionToConfirm?.is_confirmed,
+        date: sessionToConfirm?.date
+      });
+      
+      if (!sessionToConfirm) {
+        console.error('❌ Sessão não encontrada na lista local');
+        alert('❌ Sessão não encontrada');
+        return;
+      }
+      
+      if (sessionToConfirm.is_confirmed) {
+        console.log('⚠️ Sessão já confirmada');
+        alert('⚠️ Esta sessão já foi confirmada');
+        return;
+      }
+      
+      // Confirmar via API
+      console.log('📤 Enviando confirmação para API...');
       const response = await apiService.confirmSession(sessionId);
-      console.log('📤 Resposta da API:', response);
+      console.log('📥 Resposta da API de confirmação:', response);
       
-      // ✅ CORREÇÃO: Recarregar dados após confirmação
+      // ✅ CORREÇÃO: Recarregar dados de forma mais robusta
       console.log('🔄 Recarregando dados após confirmação...');
+      
+      // Recarregar com delay para garantir que o banco foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Recarregar todas as sessões e pacientes
       const [updatedSessions, updatedPatients] = await Promise.all([
         apiService.getSessions({ month: selectedMonth, year: selectedYear }),
-        apiService.getPatients() // Recarregar pacientes também
+        apiService.getPatients()
       ]);
       
-      console.log('📊 Sessões atualizadas:', updatedSessions.length);
-      console.log('🔍 Sessão confirmada:', updatedSessions.find(s => s.id === sessionId));
+      console.log('📊 Dados recarregados:');
+      console.log('- Total de sessões:', updatedSessions.length);
+      console.log('- Total de pacientes:', updatedPatients.length);
       
-      setSessions(updatedSessions);
-      setPatients(updatedPatients);
+      // Verificar se a sessão foi realmente confirmada
+      const updatedSession = updatedSessions.find(s => s.id === sessionId);
+      console.log('🔍 Sessão após confirmação:', {
+        id: updatedSession?.id,
+        is_confirmed: updatedSession?.is_confirmed,
+        confirmed_at: updatedSession?.confirmed_at,
+        confirmed_by: updatedSession?.confirmed_by
+      });
       
-      console.log('✅ Sessão confirmada com sucesso');
-      alert('✅ Atendimento confirmado com sucesso! Agora estará visível para os pais.');
+      if (updatedSession && updatedSession.is_confirmed) {
+        console.log('✅ Confirmação bem-sucedida!');
+        
+        // Atualizar estados
+        setSessions(updatedSessions);
+        setPatients(updatedPatients);
+        
+        // Buscar nome do paciente para mensagem
+        const patient = updatedPatients.find(p => p.id === updatedSession.patient_id);
+        const patientName = patient?.name || 'Paciente';
+        
+        alert(`✅ Atendimento de ${patientName} confirmado com sucesso!\n\n📱 Agora estará visível para os pais no painel deles.`);
+        
+      } else {
+        console.error('❌ Sessão não foi confirmada corretamente');
+        alert('❌ Erro: A sessão não foi confirmada. Verifique os logs e tente novamente.');
+      }
       
     } catch (error) {
       console.error('❌ Erro ao confirmar sessão:', error);
       
-      // Mensagem de erro mais específica
+      // Mensagem de erro mais específica e útil
       let errorMessage = 'Erro ao confirmar atendimento';
+      
       if (error instanceof Error) {
         if (error.message.includes('404')) {
-          errorMessage = 'Atendimento não encontrado';
-        } else if (error.message.includes('403') || error.message.includes('401')) {
-          errorMessage = 'Você não tem permissão para confirmar este atendimento';
+          errorMessage = '❌ Atendimento não encontrado no sistema';
+        } else if (error.message.includes('403')) {
+          errorMessage = '❌ Você não tem permissão para confirmar este atendimento';
+        } else if (error.message.includes('401')) {
+          errorMessage = '❌ Sessão expirada. Faça login novamente';
         } else if (error.message.includes('500')) {
-          errorMessage = 'Erro interno do servidor. Tente novamente';
+          errorMessage = '❌ Erro interno do servidor. Contate o suporte técnico';
+        } else if (error.message.includes('Network')) {
+          errorMessage = '❌ Erro de conexão. Verifique sua internet e tente novamente';
         } else {
-          errorMessage = `Erro: ${error.message}`;
+          errorMessage = `❌ ${error.message}`;
         }
       }
       
-      alert(`❌ ${errorMessage}`);
+      alert(errorMessage);
+      
+      // Tentar recarregar dados mesmo com erro para sincronizar
+      try {
+        console.log('🔄 Tentando recarregar dados após erro...');
+        const [sessionsData, patientsData] = await Promise.all([
+          apiService.getSessions({ month: selectedMonth, year: selectedYear }),
+          apiService.getPatients()
+        ]);
+        setSessions(sessionsData);
+        setPatients(patientsData);
+      } catch (reloadError) {
+        console.error('❌ Erro ao recarregar dados:', reloadError);
+      }
     }
   };
 
+  // ✅ FUNÇÃO DE REJEIÇÃO MELHORADA
   const handleRejectSession = async (sessionId: string) => {
-    if (window.confirm('❓ Tem certeza que deseja rejeitar este atendimento? Esta ação não pode ser desfeita.')) {
+    const sessionToReject = sessions.find(s => s.id === sessionId);
+    const patient = patients.find(p => p.id === sessionToReject?.patient_id);
+    const patientName = patient?.name || 'Paciente não identificado';
+    
+    if (window.confirm(`❓ Tem certeza que deseja rejeitar o atendimento de ${patientName}?\n\n⚠️ Esta ação irá EXCLUIR permanentemente o atendimento do sistema e não pode ser desfeita.`)) {
       try {
         console.log('🗑️ [ADMIN] Rejeitando (deletando) sessão:', sessionId);
         
         await apiService.deleteSession(sessionId);
         
         // Recarregar dados
-        const updatedSessions = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
+        console.log('🔄 Recarregando dados após rejeição...');
+        const [updatedSessions, updatedPatients] = await Promise.all([
+          apiService.getSessions({ month: selectedMonth, year: selectedYear }),
+          apiService.getPatients()
+        ]);
+        
         setSessions(updatedSessions);
+        setPatients(updatedPatients);
         
         console.log('✅ Atendimento rejeitado com sucesso');
-        alert('✅ Atendimento rejeitado com sucesso!');
+        alert(`✅ Atendimento de ${patientName} rejeitado e removido do sistema.`);
         
       } catch (error) {
         console.error('❌ Erro ao rejeitar sessão:', error);
-        alert('❌ Erro ao rejeitar atendimento');
+        alert('❌ Erro ao rejeitar atendimento. Tente novamente.');
       }
     }
   };
@@ -694,7 +772,7 @@ export const AdminDashboard: React.FC = () => {
         </Card>
       )}
 
-      {/* ABA: Confirmar Atendimentos - CORRIGIDA */}
+     {/* ABA: Confirmar Atendimentos - COMPLETAMENTE CORRIGIDA */}
       {activeTab === 'confirmacao' && (
         <Card>
           <CardHeader>
@@ -712,6 +790,21 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent>
+            {/* Mostrar contador de sessões pendentes */}
+            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <AlertCircle className="w-5 h-5 text-yellow-600" />
+                <span className="font-semibold text-yellow-800">
+                  {pendingSessions.length} atendimento(s) aguardando confirmação
+                </span>
+              </div>
+              {pendingSessions.length > 0 && (
+                <p className="text-xs text-yellow-700 mt-1">
+                  Confirme os atendimentos para que os pais possam visualizá-los no sistema.
+                </p>
+              )}
+            </div>
+            
             <Table>
               <TableHeader>
                 <TableRow>
@@ -731,7 +824,7 @@ export const AdminDashboard: React.FC = () => {
                   const hours = calculateHours(session.start_time, session.end_time);
 
                   return (
-                    <TableRow key={session.id}>
+                    <TableRow key={session.id} className="hover:bg-yellow-50">
                       <TableCell>{formatDateBR(session.date)}</TableCell>
                       <TableCell className="font-medium">
                         {patient?.name || 'N/A'}
@@ -740,15 +833,19 @@ export const AdminDashboard: React.FC = () => {
                       <TableCell>
                         {at?.name || 'N/A'}
                         {session.is_substitution && (
-                          <div className="text-xs text-orange-600 font-medium">Substituição</div>
+                          <div className="text-xs text-orange-600 font-medium">
+                            🔄 Substituição
+                          </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="text-sm">
+                        <div className="text-sm font-mono">
                           {session.start_time} - {session.end_time}
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium">{formatHours(hours)}</TableCell>
+                      <TableCell className="font-medium text-purple-600">
+                        {formatHours(hours)}
+                      </TableCell>
                       <TableCell>
                         <div className="max-w-xs truncate" title={session.observations}>
                           {session.observations || 'Sem observações'}
@@ -760,17 +857,21 @@ export const AdminDashboard: React.FC = () => {
                             size="sm"
                             variant="success"
                             onClick={() => handleConfirmSession(session.id)}
-                            title="Confirmar atendimento - Ficará visível para os pais"
+                            title="✅ Confirmar atendimento - Ficará visível para os pais"
+                            className="bg-green-600 hover:bg-green-700 text-white"
                           >
-                            <CheckCircle size={14} />
+                            <CheckCircle size={14} className="mr-1" />
+                            Confirmar
                           </Button>
                           <Button
                             size="sm"
                             variant="danger"
                             onClick={() => handleRejectSession(session.id)}
-                            title="Rejeitar atendimento - Será removido do sistema"
+                            title="❌ Rejeitar atendimento - Será removido do sistema"
+                            className="bg-red-600 hover:bg-red-700 text-white"
                           >
-                            <X size={14} />
+                            <X size={14} className="mr-1" />
+                            Rejeitar
                           </Button>
                         </div>
                       </TableCell>
@@ -781,14 +882,56 @@ export const AdminDashboard: React.FC = () => {
             </Table>
             
             {pendingSessions.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <CheckCircle className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-                <p>Nenhum atendimento pendente de confirmação</p>
+              <div className="text-center py-12 text-gray-500">
+                <CheckCircle className="w-20 h-20 mx-auto text-gray-300 mb-6" />
+                <h3 className="text-lg font-semibold text-gray-600 mb-2">
+                  🎉 Parabéns! Nenhum atendimento pendente
+                </h3>
+                <p className="text-gray-500">
+                  Todos os atendimentos do período já foram confirmados.
+                </p>
                 {searchTerm && (
-                  <p className="text-sm mt-2">
-                    Filtrado por: "{searchTerm}"
-                  </p>
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm text-blue-700">
+                      Filtro aplicado: <strong>"{searchTerm}"</strong>
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setSearchTerm('')}
+                      className="mt-2"
+                    >
+                      Limpar filtro
+                    </Button>
+                  </div>
                 )}
+              </div>
+            )}
+            
+            {/* Ações em lote para múltiplas confirmações */}
+            {pendingSessions.length > 1 && (
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg border">
+                <h4 className="font-semibold text-gray-800 mb-3">⚡ Ações em Lote</h4>
+                <div className="flex space-x-3">
+                  <Button
+                    variant="success"
+                    size="sm"
+                    onClick={() => {
+                      if (window.confirm(`Confirmar TODOS os ${pendingSessions.length} atendimentos pendentes?\n\nEsta ação tornará todos visíveis para os pais.`)) {
+                        // Implementar confirmação em lote se necessário
+                        alert('Funcionalidade de confirmação em lote será implementada em breve!');
+                      }
+                    }}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    <CheckCircle size={16} className="mr-2" />
+                    Confirmar Todos ({pendingSessions.length})
+                  </Button>
+                  
+                  <div className="text-xs text-gray-500 flex items-center">
+                    ⚠️ Use com cuidado: esta ação afetará múltiplos atendimentos
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>
