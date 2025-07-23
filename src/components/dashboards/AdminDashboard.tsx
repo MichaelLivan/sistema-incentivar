@@ -26,8 +26,10 @@ interface NewPatientForm {
   hourly_rate: number;
   parentName: string;
   parentEmail: string;
+  parentPhone: string;
   parentName2: string;
   parentEmail2: string;
+  parentPhone2: string;
   assignedATId: string;
 }
 
@@ -100,8 +102,10 @@ export const AdminDashboard: React.FC = () => {
     hourly_rate: 60,
     parentName: '',
     parentEmail: '',
+    parentPhone: '',
     parentName2: '',
     parentEmail2: '',
+    parentPhone2: '',
     assignedATId: ''
   });
 
@@ -149,14 +153,20 @@ export const AdminDashboard: React.FC = () => {
     );
   });
 
-  // FUNÇÕES DA RECEPÇÃO - Confirmar atendimentos
+  // FUNÇÕES DA RECEPÇÃO - Confirmar atendimentos (CORRIGIDA)
   const handleConfirmSession = async (sessionId: string) => {
     try {
+      console.log('✅ Confirmando sessão:', sessionId);
       await apiService.confirmSession(sessionId);
+      
+      // Recarregar dados
       const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
       setSessions(sessionsData);
+      
+      console.log('✅ Sessão confirmada com sucesso');
+      alert('Atendimento confirmado com sucesso!');
     } catch (error) {
-      console.error('Erro ao confirmar sessão:', error);
+      console.error('❌ Erro ao confirmar sessão:', error);
       alert('Erro ao confirmar atendimento');
     }
   };
@@ -167,6 +177,7 @@ export const AdminDashboard: React.FC = () => {
         await apiService.deleteSession(sessionId);
         const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
         setSessions(sessionsData);
+        alert('Atendimento rejeitado com sucesso!');
       } catch (error) {
         console.error('Erro ao rejeitar sessão:', error);
         alert('Erro ao rejeitar sessão');
@@ -274,8 +285,10 @@ export const AdminDashboard: React.FC = () => {
         hourly_rate: newPatientForm.hourly_rate,
         parent_email: newPatientForm.parentEmail,
         parent_name: newPatientForm.parentName,
+        parent_phone: newPatientForm.parentPhone || null,
         parent_email2: newPatientForm.parentEmail2 || null,
-        parent_name2: newPatientForm.parentName2 || null
+        parent_name2: newPatientForm.parentName2 || null,
+        parent_phone2: newPatientForm.parentPhone2 || null
       };
 
       if (editingPatient) {
@@ -295,8 +308,10 @@ export const AdminDashboard: React.FC = () => {
         hourly_rate: 60,
         parentName: '',
         parentEmail: '',
+        parentPhone: '',
         parentName2: '',
         parentEmail2: '',
+        parentPhone2: '',
         assignedATId: ''
       });
       setEditingPatient(null);
@@ -356,8 +371,10 @@ export const AdminDashboard: React.FC = () => {
         hourly_rate: patient.hourly_rate,
         parentName: patient.parent_name || patient.parent?.name || '',
         parentEmail: patient.parent_email || patient.parent?.email || '',
+        parentPhone: patient.parent_phone || '',
         parentName2: patient.parent_name2 || '',
         parentEmail2: patient.parent_email2 || '',
+        parentPhone2: patient.parent_phone2 || '',
         assignedATId: patient.at_id || ''
       });
       setEditingPatient(patientId);
@@ -647,10 +664,11 @@ export const AdminDashboard: React.FC = () => {
           <CardHeader>
             <CardTitle className="text-orange-600">
               <Clock className="inline w-5 h-5 mr-2" />
-              Atendimentos Pendentes de Confirmação
+              Atendimentos Pendentes de Confirmação (Recepção)
             </CardTitle>
             <p className="text-sm text-gray-600 mt-2">
-              Confirme os atendimentos abaixo para que sejam enviados automaticamente ao financeiro.
+              ✅ <strong>Confirme os atendimentos</strong> para que sejam enviados automaticamente ao financeiro. 
+              Os pais apenas visualizam os atendimentos, não precisam confirmar.
             </p>
           </CardHeader>
           <CardContent>
@@ -875,7 +893,7 @@ export const AdminDashboard: React.FC = () => {
         </Card>
       )}
 
-      {/* ABA: Gerenciar Pacientes */}
+      {/* ABA: Gerenciar Pacientes - LAYOUT MELHORADO */}
       {activeTab === 'pacientes' && (
         <Card>
           <CardHeader>
@@ -889,142 +907,191 @@ export const AdminDashboard: React.FC = () => {
           </CardHeader>
           <CardContent>
             {showPatientForm && (
-              <form onSubmit={handlePatientSubmit} className="space-y-4 mb-6 p-4 bg-gray-50 rounded-lg">
+              <form onSubmit={handlePatientSubmit} className="space-y-6 mb-6 p-6 bg-gray-50 rounded-lg">
                 <h3 className="text-lg font-semibold text-purple-800">
                   {editingPatient ? 'Editar Paciente' : 'Cadastrar Novo Paciente'}
                 </h3>
                 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Nome Completo do Paciente *
-                    </label>
-                    <Input
-                      name="name"
-                      value={newPatientForm.name}
-                      onChange={handlePatientInputChange}
-                      placeholder="Nome completo do paciente"
-                      required
-                    />
-                  </div>
+                {/* SEÇÃO 1: Dados do Paciente */}
+                <div className="bg-white p-4 rounded-lg border">
+                  <h4 className="text-md font-semibold text-gray-800 mb-4">📋 Dados do Paciente</h4>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                    <div className="lg:col-span-2">
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Nome Completo do Paciente *
+                      </label>
+                      <Input
+                        name="name"
+                        value={newPatientForm.name}
+                        onChange={handlePatientInputChange}
+                        placeholder="Nome completo do paciente"
+                        required
+                      />
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Setor
-                    </label>
-                    <Select
-                      name="sector"
-                      value={newPatientForm.sector}
-                      onChange={handlePatientInputChange}
-                    >
-                      <option value="aba">ABA</option>
-                      <option value="denver">Denver</option>
-                      <option value="grupo">Grupo</option>
-                      <option value="escolar">Escolar</option>
-                    </Select>
-                  </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Setor
+                      </label>
+                      <Select
+                        name="sector"
+                        value={newPatientForm.sector}
+                        onChange={handlePatientInputChange}
+                      >
+                        <option value="aba">ABA</option>
+                        <option value="denver">Denver</option>
+                        <option value="grupo">Grupo</option>
+                        <option value="escolar">Escolar</option>
+                      </Select>
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Carga Horária Semanal *
-                    </label>
-                    <Input
-                      type="time"
-                      name="weeklyHours"
-                      value={hoursToTimeInput(newPatientForm.weeklyHours)}
-                      onChange={handleTimeInputChange}
-                      required
-                    />
-                  </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Carga Horária Semanal *
+                      </label>
+                      <Input
+                        type="time"
+                        name="weeklyHours"
+                        value={hoursToTimeInput(newPatientForm.weeklyHours)}
+                        onChange={handleTimeInputChange}
+                        required
+                      />
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Nome do 1º Responsável *
-                    </label>
-                    <Input
-                      name="parentName"
-                      value={newPatientForm.parentName}
-                      onChange={handlePatientInputChange}
-                      placeholder="Nome do primeiro responsável"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Email do 1º Responsável *
-                    </label>
-                    <Input
-                      type="email"
-                      name="parentEmail"
-                      value={newPatientForm.parentEmail}
-                      onChange={handlePatientInputChange}
-                      placeholder="responsavel1@email.com"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Nome do 2º Responsável (Opcional)
-                    </label>
-                    <Input
-                      name="parentName2"
-                      value={newPatientForm.parentName2}
-                      onChange={handlePatientInputChange}
-                      placeholder="Nome do segundo responsável"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Email do 2º Responsável (Opcional)
-                    </label>
-                    <Input
-                      type="email"
-                      name="parentEmail2"
-                      value={newPatientForm.parentEmail2}
-                      onChange={handlePatientInputChange}
-                      placeholder="responsavel2@email.com"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      Valor por Hora (R$)
-                    </label>
-                    <Input
-                      type="number"
-                      name="hourly_rate"
-                      value={String(newPatientForm.hourly_rate)}
-                      onChange={handlePatientInputChange}
-                      placeholder="60.00"
-                      step="0.01"
-                      min="0"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
-                      AT Responsável (Opcional)
-                    </label>
-                    <Select
-                      name="assignedATId"
-                      value={newPatientForm.assignedATId}
-                      onChange={handlePatientInputChange}
-                    >
-                      <option value="">Nenhum AT atribuído</option>
-                      {sectorAts.map(at => (
-                        <option key={at.id} value={at.id}>
-                          {at.name}
-                        </option>
-                      ))}
-                    </Select>
+                    <div>
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Valor por Hora (R$)
+                      </label>
+                      <Input
+                        type="number"
+                        name="hourly_rate"
+                        value={String(newPatientForm.hourly_rate)}
+                        onChange={handlePatientInputChange}
+                        placeholder="60.00"
+                        step="0.01"
+                        min="0"
+                        required
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-3">
+                {/* SEÇÃO 2: Primeiro Responsável */}
+                <div className="bg-white p-4 rounded-lg border">
+                  <h4 className="text-md font-semibold text-gray-800 mb-4">👤 Primeiro Responsável</h4>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                    <div className="lg:col-span-2">
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Nome do 1º Responsável *
+                      </label>
+                      <Input
+                        name="parentName"
+                        value={newPatientForm.parentName}
+                        onChange={handlePatientInputChange}
+                        placeholder="Nome do primeiro responsável"
+                        required
+                      />
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Email do 1º Responsável *
+                      </label>
+                      <Input
+                        type="email"
+                        name="parentEmail"
+                        value={newPatientForm.parentEmail}
+                        onChange={handlePatientInputChange}
+                        placeholder="responsavel1@email.com"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Contato 1º Resp.
+                      </label>
+                      <Input
+                        type="tel"
+                        name="parentPhone"
+                        value={newPatientForm.parentPhone}
+                        onChange={handlePatientInputChange}
+                        placeholder="(11) 99999-9999"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* SEÇÃO 3: Segundo Responsável (Opcional) */}
+                <div className="bg-white p-4 rounded-lg border">
+                  <h4 className="text-md font-semibold text-gray-800 mb-4">👥 Segundo Responsável (Opcional)</h4>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                    <div className="lg:col-span-2">
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Nome do 2º Responsável
+                      </label>
+                      <Input
+                        name="parentName2"
+                        value={newPatientForm.parentName2}
+                        onChange={handlePatientInputChange}
+                        placeholder="Nome do segundo responsável"
+                      />
+                    </div>
+
+                    <div className="lg:col-span-2">
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Email do 2º Responsável
+                      </label>
+                      <Input
+                        type="email"
+                        name="parentEmail2"
+                        value={newPatientForm.parentEmail2}
+                        onChange={handlePatientInputChange}
+                        placeholder="responsavel2@email.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        Contato 2º Resp.
+                      </label>
+                      <Input
+                        type="tel"
+                        name="parentPhone2"
+                        value={newPatientForm.parentPhone2}
+                        onChange={handlePatientInputChange}
+                        placeholder="(11) 99999-9999"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* SEÇÃO 4: AT Responsável */}
+                <div className="bg-white p-4 rounded-lg border">
+                  <h4 className="text-md font-semibold text-gray-800 mb-4">🩺 AT Responsável</h4>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                    <div className="lg:col-span-3">
+                      <label className="block text-sm font-semibold text-purple-800 mb-2">
+                        AT Responsável (Opcional)
+                      </label>
+                      <Select
+                        name="assignedATId"
+                        value={newPatientForm.assignedATId}
+                        onChange={handlePatientInputChange}
+                      >
+                        <option value="">Nenhum AT atribuído</option>
+                        {sectorAts.map(at => (
+                          <option key={at.id} value={at.id}>
+                            {at.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Botões de Ação */}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
                   <Button type="button" variant="secondary" onClick={() => {
                     setShowPatientForm(false);
                     setEditingPatient(null);
