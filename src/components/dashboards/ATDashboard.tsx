@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -8,51 +7,40 @@ import { Footer } from '../ui/Footer';
 import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } from '../ui/Table';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import { Clock, Calendar, User, AlertCircle, X, Search } from 'lucide-react';
+import { Clock, Calendar, User, AlertCircle, X, Search, BookOpen, Users } from 'lucide-react';
 import { formatHours } from '../../utils/formatters';
-
-type Patient = {
-  id: string;
-  name: string;
-  sector: string;
-  weeklyHours: number;
-  at_id: string;
-  // add other fields as needed
-};
-
-type Session = {
-  id: string;
-  patient_id: string;
-  at_id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  hours: number;
-  is_launched?: boolean;
-  is_approved?: boolean;
-  is_substitution?: boolean;
-  // add other fields as needed
-};
 
 export const ATDashboard: React.FC = () => {
   const { user } = useAuth();
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [allSectorPatients, setAllSectorPatients] = useState<Patient[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [patients, setPatients] = useState([]);
+  const [allSectorPatients, setAllSectorPatients] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [supervisions, setSupervisions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('atendimentos'); // 'atendimentos' ou 'supervisoes'
+  
+  // Estados para atendimentos
   const [sessionForm, setSessionForm] = useState({
     patientId: '',
     startTime: '',
     endTime: '',
     date: (() => {
       const today = new Date();
-      const year = today.getFullYear();
-      const month = String(today.getMonth() + 1).padStart(2, '0');
-      const day = String(today.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
+      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     })(),
     observations: '',
     isSubstitution: false,
+  });
+
+  // Estados para supervisões
+  const [supervisionForm, setSupervisionForm] = useState({
+    startTime: '',
+    endTime: '',
+    date: (() => {
+      const today = new Date();
+      return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    })(),
+    observations: '',
   });
 
   const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
@@ -64,19 +52,22 @@ export const ATDashboard: React.FC = () => {
         setLoading(true);
         
         console.log('🔍 CARREGANDO DADOS...');
-        const [myPatientsData, allSectorPatientsData, sessionsData] = await Promise.all([
+        const [myPatientsData, allSectorPatientsData, sessionsData, supervisionsData] = await Promise.all([
           apiService.getPatients(), // Meus pacientes
           apiService.getPatientsForSubstitution(), // Todos do setor
-          apiService.getSessions()
+          apiService.getSessions(),
+          apiService.getSupervisions()
         ]);
         
         console.log('📊 DADOS CARREGADOS:');
         console.log('- Meus pacientes:', myPatientsData.length);
         console.log('- Todos do setor:', allSectorPatientsData.length);
+        console.log('- Supervisões:', supervisionsData.length);
         
         setPatients(myPatientsData);
         setAllSectorPatients(allSectorPatientsData);
         setSessions(sessionsData);
+        setSupervisions(supervisionsData);
       } catch (error) {
         console.error('Erro ao carregar dados:', error);
       } finally {
@@ -87,17 +78,8 @@ export const ATDashboard: React.FC = () => {
     loadData();
   }, []);
 
-  // CORREÇÃO: Usar dados corretos para cada contexto
-  const myPatients = patients; // Já vem filtrado do backend
-  
-  // Para substituição: usar todos os pacientes do setor
+  const myPatients = patients;
   const sectorPatients = allSectorPatients;
-  
-  // LOGS DE DEBUG
-  console.log('🔍 DADOS PROCESSADOS:');
-  console.log('- Meus pacientes:', myPatients.length);
-  console.log('- Pacientes do setor:', sectorPatients.length);
-  console.log('- User sector:', user?.sector);
 
   // Filtrar pacientes baseado na pesquisa
   const filteredSectorPatients = sectorPatients.filter(patient =>
@@ -105,33 +87,24 @@ export const ATDashboard: React.FC = () => {
     patient.sector.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const calculateHours = (start: string, end: string): number => {
-  if (!start || !end) return 0;
-  
-  // Garantir que funciona com HH:MM ou HH:MM:SS
-  const startParts = start.split(':');
-  const endParts = end.split(':');
-  
-  const startHour = parseInt(startParts[0]) || 0;
-  const startMin = parseInt(startParts[1]) || 0;
-  const startSec = parseInt(startParts[2]) || 0;
-  
-  const endHour = parseInt(endParts[0]) || 0;
-  const endMin = parseInt(endParts[1]) || 0;
-  const endSec = parseInt(endParts[2]) || 0;
-  
-  // Calcular em minutos para evitar problemas de precisão com decimais
-  const startTotalMinutes = startHour * 60 + startMin + (startSec / 60);
-  const endTotalMinutes = endHour * 60 + endMin + (endSec / 60);
-  
-  // Retornar diferença em horas SEM arredondamento
-  const diffMinutes = Math.max(0, endTotalMinutes - startTotalMinutes);
-  return diffMinutes / 60;
-};
+  const calculateHours = (start, end) => {
+    if (!start || !end) return 0;
+    const startParts = start.split(':');
+    const endParts = end.split(':');
+    const startHour = parseInt(startParts[0]) || 0;
+    const startMin = parseInt(startParts[1]) || 0;
+    const endHour = parseInt(endParts[0]) || 0;
+    const endMin = parseInt(endParts[1]) || 0;
+    const startTotalMinutes = startHour * 60 + startMin;
+    const endTotalMinutes = endHour * 60 + endMin;
+    const diffMinutes = Math.max(0, endTotalMinutes - startTotalMinutes);
+    return diffMinutes / 60;
+  };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+  // Handlers para Atendimentos
+  const handleSessionInputChange = (e) => {
     const { name, value, type } = e.target;
-    const checked = (e.target as HTMLInputElement).checked;
+    const checked = e.target.checked;
     
     setSessionForm(prev => {
       const newForm = {
@@ -139,17 +112,15 @@ export const ATDashboard: React.FC = () => {
         [name]: type === 'checkbox' ? checked : value
       };
 
-      // Se marcou substituição, abrir modal e limpar paciente selecionado
       if (name === 'isSubstitution' && checked) {
         setShowSubstitutionModal(true);
-        setSearchTerm(''); // Limpar busca
+        setSearchTerm('');
         newForm.patientId = '';
       }
       
-      // Se desmarcou substituição, fechar modal
       if (name === 'isSubstitution' && !checked) {
         setShowSubstitutionModal(false);
-        setSearchTerm(''); // Limpar busca
+        setSearchTerm('');
         newForm.patientId = '';
       }
 
@@ -157,27 +128,13 @@ export const ATDashboard: React.FC = () => {
     });
   };
 
-  const handleSubstitutionPatientSelect = (patientId: string) => {
-    setSessionForm(prev => ({
-      ...prev,
-      patientId
-    }));
+  const handleSubstitutionPatientSelect = (patientId) => {
+    setSessionForm(prev => ({ ...prev, patientId }));
     setShowSubstitutionModal(false);
-    setSearchTerm(''); // Limpar busca após seleção
+    setSearchTerm('');
   };
 
-  const handleCloseModal = () => {
-    setShowSubstitutionModal(false);
-    setSearchTerm(''); // Limpar busca ao fechar
-    setSessionForm(prev => ({ ...prev, isSubstitution: false }));
-  };
-
-  const handleOpenModal = () => {
-    setShowSubstitutionModal(true);
-    setSearchTerm(''); // Limpar busca ao abrir
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSessionSubmit = (e) => {
     e.preventDefault();
     
     if (!sessionForm.patientId) {
@@ -187,7 +144,6 @@ export const ATDashboard: React.FC = () => {
 
     const createSession = async () => {
       try {
-        const hours = calculateHours(sessionForm.startTime, sessionForm.endTime);
         await apiService.createSession({
           patient_id: sessionForm.patientId,
           start_time: sessionForm.startTime,
@@ -197,11 +153,9 @@ export const ATDashboard: React.FC = () => {
           is_substitution: sessionForm.isSubstitution
         });
         
-        // Recarregar sessões
         const sessionsData = await apiService.getSessions();
         setSessions(sessionsData);
         
-        // Limpar formulário
         setSessionForm({
           patientId: '',
           startTime: '',
@@ -219,14 +173,58 @@ export const ATDashboard: React.FC = () => {
     createSession();
   };
 
-  const currentHours = calculateHours(sessionForm.startTime, sessionForm.endTime);
+  // Handlers para Supervisões
+  const handleSupervisionInputChange = (e) => {
+    const { name, value } = e.target;
+    setSupervisionForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSupervisionSubmit = (e) => {
+    e.preventDefault();
+    
+    const createSupervision = async () => {
+      try {
+        await apiService.createSupervision({
+          at_id: user.id, // O próprio AT lança sua supervisão
+          start_time: supervisionForm.startTime,
+          end_time: supervisionForm.endTime,
+          date: supervisionForm.date,
+          observations: supervisionForm.observations
+        });
+        
+        const supervisionsData = await apiService.getSupervisions();
+        setSupervisions(supervisionsData);
+        
+        setSupervisionForm({
+          startTime: '',
+          endTime: '',
+          date: new Date().toISOString().split('T')[0],
+          observations: '',
+        });
+        
+        alert('Supervisão lançada com sucesso!');
+      } catch (error) {
+        console.error('Erro ao criar supervisão:', error);
+        alert('Erro ao lançar supervisão');
+      }
+    };
+
+    createSupervision();
+  };
+
+  // Estatísticas
+  const currentHours = calculateHours(
+    activeTab === 'atendimentos' ? sessionForm.startTime : supervisionForm.startTime,
+    activeTab === 'atendimentos' ? sessionForm.endTime : supervisionForm.endTime
+  );
+
   const mySessionsThisMonth = sessions.filter(s => 
     s.at_id === user?.id && 
     new Date(s.date).getMonth() === new Date().getMonth()
   );
-  const totalHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => sum + s.hours, 0);
 
-  // Encontrar o paciente selecionado para mostrar o nome
+  const mySupervisions = supervisions.filter(s => s.at_id === user?.id);
+  const totalHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => sum + s.hours, 0);
   const selectedPatient = allSectorPatients.find(p => p.id === sessionForm.patientId);
 
   if (loading) {
@@ -238,6 +236,7 @@ export const ATDashboard: React.FC = () => {
       </div>
     );
   }
+
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
       {/* Modal de Substituição */}
@@ -251,18 +250,13 @@ export const ATDashboard: React.FC = () => {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={handleCloseModal}
+                onClick={() => setShowSubstitutionModal(false)}
               >
                 <X className="w-4 h-4" />
               </Button>
             </div>
             
             <div className="p-6">
-              <p className="text-gray-600 mb-4">
-                Selecione o paciente que você está substituindo neste atendimento:
-              </p>
-              
-              {/* Campo de Busca */}
               <div className="mb-4">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -274,14 +268,8 @@ export const ATDashboard: React.FC = () => {
                     className="pl-10"
                   />
                 </div>
-                {searchTerm && (
-                  <p className="text-sm text-gray-500 mt-2">
-                    {filteredSectorPatients.length} paciente(s) encontrado(s)
-                  </p>
-                )}
               </div>
               
-              {/* Lista de Pacientes */}
               <div className="overflow-y-auto max-h-[50vh]">
                 {filteredSectorPatients.length > 0 ? (
                   <div className="grid grid-cols-1 gap-3">
@@ -308,15 +296,12 @@ export const ATDashboard: React.FC = () => {
                                 )}
                               </h4>
                               <p className="text-sm text-gray-600">
-                                Setor: {patient.sector.toUpperCase()} • 
-                                Carga Semanal: {patient.weeklyHours}h
+                                Setor: {patient.sector.toUpperCase()}
                               </p>
                             </div>
-                            <div className="text-right">
-                              <Button size="sm" variant="primary">
-                                Selecionar
-                              </Button>
-                            </div>
+                            <Button size="sm" variant="primary">
+                              Selecionar
+                            </Button>
                           </div>
                         </div>
                       );
@@ -348,7 +333,7 @@ export const ATDashboard: React.FC = () => {
       )}
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="flex items-center space-x-4">
             <div className="p-3 bg-teal-100 rounded-lg">
@@ -379,225 +364,371 @@ export const ATDashboard: React.FC = () => {
               <Calendar className="w-6 h-6 text-purple-600" />
             </div>
             <div>
-              <p className="text-sm text-gray-600">Sessões</p>
+              <p className="text-sm text-gray-600">Atendimentos</p>
               <p className="text-2xl font-bold text-purple-700">{mySessionsThisMonth.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="flex items-center space-x-4">
+            <div className="p-3 bg-orange-100 rounded-lg">
+              <BookOpen className="w-6 h-6 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Supervisões</p>
+              <p className="text-2xl font-bold text-purple-700">{mySupervisions.length}</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Registrar Atendimento */}
+      {/* Abas */}
       <Card>
         <CardHeader>
-          <CardTitle>Registrar Atendimento</CardTitle>
+          <div className="flex space-x-4">
+            <Button
+              onClick={() => setActiveTab('atendimentos')}
+              variant={activeTab === 'atendimentos' ? 'primary' : 'secondary'}
+              className="flex items-center space-x-2"
+            >
+              <Users className="w-4 h-4" />
+              <span>Atendimentos</span>
+            </Button>
+            <Button
+              onClick={() => setActiveTab('supervisoes')}
+              variant={activeTab === 'supervisoes' ? 'primary' : 'secondary'}
+              className="flex items-center space-x-2"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>Supervisões</span>
+            </Button>
+          </div>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-purple-800 mb-2">
-                  Paciente
-                </label>
-                {sessionForm.isSubstitution ? (
-                  <div className="space-y-2">
-                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                      <div className="flex items-center space-x-2">
-                        <AlertCircle className="w-5 h-5 text-orange-600" />
-                        <span className="text-orange-800 font-medium">Modo Substituição</span>
-                      </div>
-                      {selectedPatient ? (
-                        <div className="mt-2">
-                          <p className="text-sm text-orange-700">
-                            Paciente selecionado: <strong>{selectedPatient.name}</strong>
-                          </p>
+      </Card>
+
+      {/* Formulário de Atendimento */}
+      {activeTab === 'atendimentos' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Registrar Atendimento</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSessionSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Paciente
+                  </label>
+                  {sessionForm.isSubstitution ? (
+                    <div className="space-y-2">
+                      <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <AlertCircle className="w-5 h-5 text-orange-600" />
+                          <span className="text-orange-800 font-medium">Modo Substituição</span>
+                        </div>
+                        {selectedPatient ? (
+                          <div className="mt-2">
+                            <p className="text-sm text-orange-700">
+                              Paciente selecionado: <strong>{selectedPatient.name}</strong>
+                            </p>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setShowSubstitutionModal(true)}
+                              className="mt-2"
+                            >
+                              Trocar Paciente
+                            </Button>
+                          </div>
+                        ) : (
                           <Button
                             type="button"
                             size="sm"
-                            variant="secondary"
-                            onClick={handleOpenModal}
+                            variant="primary"
+                            onClick={() => setShowSubstitutionModal(true)}
                             className="mt-2"
                           >
-                            Trocar Paciente
+                            Selecionar Paciente
                           </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="primary"
-                          onClick={handleOpenModal}
-                          className="mt-2"
-                        >
-                          Selecionar Paciente
-                        </Button>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <Select
-                    name="patientId"
-                    value={sessionForm.patientId}
-                    onChange={handleInputChange}
+                  ) : (
+                    <Select
+                      name="patientId"
+                      value={sessionForm.patientId}
+                      onChange={handleSessionInputChange}
+                      required
+                    >
+                      <option value="">Selecione o paciente</option>
+                      {myPatients.map(patient => (
+                        <option key={patient.id} value={patient.id}>
+                          {patient.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Data
+                  </label>
+                  <Input
+                    type="date"
+                    name="date"
+                    value={sessionForm.date}
+                    onChange={handleSessionInputChange}
                     required
-                  >
-                    <option value="">Selecione o paciente</option>
-                    {myPatients.map(patient => (
-                      <option key={patient.id} value={patient.id}>
-                        {patient.name}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </div>
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-purple-800 mb-2">
-                  Data
-                </label>
-                <Input
-                  type="date"
-                  name="date"
-                  value={sessionForm.date}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Hora Início
+                  </label>
+                  <Input
+                    type="time"
+                    name="startTime"
+                    value={sessionForm.startTime}
+                    onChange={handleSessionInputChange}
+                    required
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-purple-800 mb-2">
-                  Hora Início
-                </label>
-                <Input
-                  type="time"
-                  name="startTime"
-                  value={sessionForm.startTime}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-purple-800 mb-2">
-                  Hora Fim
-                </label>
-                <Input
-                  type="time"
-                  name="endTime"
-                  value={sessionForm.endTime}
-                  onChange={handleInputChange}
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-purple-800 mb-2">
-                Observações
-              </label>
-              <textarea
-                name="observations"
-                value={sessionForm.observations}
-                onChange={handleInputChange}
-                rows={3}
-                placeholder="Observações sobre o atendimento..."
-                className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all duration-200 bg-white/90"
-              />
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="isSubstitution"
-                name="isSubstitution"
-                checked={sessionForm.isSubstitution}
-                onChange={handleInputChange}
-                className="w-4 h-4 text-pink-600 border-gray-300 rounded focus:ring-pink-500"
-              />
-              <label htmlFor="isSubstitution" className="text-sm font-medium text-purple-800">
-                Atendimento de Substituição
-              </label>
-            </div>
-
-            {currentHours > 0 && (
-              <div className="bg-teal-50 p-4 rounded-lg">
-                <div className="flex items-center space-x-2">
-                  <Clock className="w-5 h-5 text-teal-600" />
-                  <span className="font-semibold text-teal-800">
-                    Carga Horária: {formatHours(currentHours)}
-                  </span>
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Hora Fim
+                  </label>
+                  <Input
+                    type="time"
+                    name="endTime"
+                    value={sessionForm.endTime}
+                    onChange={handleSessionInputChange}
+                    required
+                  />
                 </div>
               </div>
-            )}
 
-            <Button type="submit" className="w-full">
-              Registrar Atendimento
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              <div>
+                <label className="block text-sm font-semibold text-purple-800 mb-2">
+                  Observações
+                </label>
+                <textarea
+                  name="observations"
+                  value={sessionForm.observations}
+                  onChange={handleSessionInputChange}
+                  rows={3}
+                  placeholder="Observações sobre o atendimento..."
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all duration-200 bg-white/90"
+                />
+              </div>
 
-      {/* Histórico de Atendimentos */}
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="isSubstitution"
+                  name="isSubstitution"
+                  checked={sessionForm.isSubstitution}
+                  onChange={handleSessionInputChange}
+                  className="w-4 h-4 text-pink-600 border-gray-300 rounded focus:ring-pink-500"
+                />
+                <label htmlFor="isSubstitution" className="text-sm font-medium text-purple-800">
+                  Atendimento de Substituição
+                </label>
+              </div>
+
+              {currentHours > 0 && activeTab === 'atendimentos' && (
+                <div className="bg-teal-50 p-4 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <Clock className="w-5 h-5 text-teal-600" />
+                    <span className="font-semibold text-teal-800">
+                      Carga Horária: {formatHours(currentHours)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <Button type="submit" className="w-full">
+                Registrar Atendimento
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Formulário de Supervisão */}
+      {activeTab === 'supervisoes' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Lançar Supervisão</CardTitle>
+            <div className="bg-green-50 p-3 rounded-lg mt-3">
+              <p className="text-sm text-green-800 font-medium">
+                🚀 Registre suas horas de supervisão que serão automaticamente enviadas ao financeiro.
+              </p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSupervisionSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Data
+                  </label>
+                  <Input
+                    type="date"
+                    name="date"
+                    value={supervisionForm.date}
+                    onChange={handleSupervisionInputChange}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Hora Início
+                  </label>
+                  <Input
+                    type="time"
+                    name="startTime"
+                    value={supervisionForm.startTime}
+                    onChange={handleSupervisionInputChange}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-purple-800 mb-2">
+                    Hora Fim
+                  </label>
+                  <Input
+                    type="time"
+                    name="endTime"
+                    value={supervisionForm.endTime}
+                    onChange={handleSupervisionInputChange}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-purple-800 mb-2">
+                  Observações
+                </label>
+                <textarea
+                  name="observations"
+                  value={supervisionForm.observations}
+                  onChange={handleSupervisionInputChange}
+                  rows={3}
+                  placeholder="Observações sobre a supervisão..."
+                  className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-pink-500 focus:ring-2 focus:ring-pink-200 transition-all duration-200 bg-white/90"
+                />
+              </div>
+
+              {currentHours > 0 && activeTab === 'supervisoes' && (
+                <div className="bg-orange-50 p-4 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <BookOpen className="w-5 h-5 text-orange-600" />
+                    <span className="font-semibold text-orange-800">
+                      Duração da Supervisão: {formatHours(currentHours)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <Button type="submit" className="w-full">
+                Lançar Supervisão
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Histórico */}
       <Card>
         <CardHeader>
-          <CardTitle>Histórico de Atendimentos</CardTitle>
+          <CardTitle>
+            {activeTab === 'atendimentos' ? 'Histórico de Atendimentos' : 'Histórico de Supervisões'}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHeadCell>Paciente</TableHeadCell>
-                <TableHeadCell>Data</TableHeadCell>
-                <TableHeadCell>Início</TableHeadCell>
-                <TableHeadCell>Fim</TableHeadCell>
-                <TableHeadCell>Horas</TableHeadCell>
-                <TableHeadCell>Status</TableHeadCell>
-                <TableHeadCell>Substituição</TableHeadCell>
+                {activeTab === 'atendimentos' ? (
+                  <>
+                    <TableHeadCell>Paciente</TableHeadCell>
+                    <TableHeadCell>Data</TableHeadCell>
+                    <TableHeadCell>Início</TableHeadCell>
+                    <TableHeadCell>Fim</TableHeadCell>
+                    <TableHeadCell>Horas</TableHeadCell>
+                    <TableHeadCell>Status</TableHeadCell>
+                    <TableHeadCell>Substituição</TableHeadCell>
+                  </>
+                ) : (
+                  <>
+                    <TableHeadCell>Data</TableHeadCell>
+                    <TableHeadCell>Início</TableHeadCell>
+                    <TableHeadCell>Fim</TableHeadCell>
+                    <TableHeadCell>Horas</TableHeadCell>
+                    <TableHeadCell>Setor</TableHeadCell>
+                    <TableHeadCell>Observações</TableHeadCell>
+                  </>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {mySessionsThisMonth.map(session => {
-                // CORREÇÃO: Buscar paciente tanto nos meus quanto nos do setor
-                const patient = patients.find(p => p.id === session.patient_id) || 
-                               allSectorPatients.find(p => p.id === session.patient_id);
-                return (
-                  <TableRow key={session.id}>
-                    <TableCell>{patient?.name || 'N/A'}</TableCell>
-                    <TableCell>{
-                      // CORREÇÃO: Evitar problema de timezone
-                      new Date(session.date + 'T00:00:00').toLocaleDateString('pt-BR')
-                    }</TableCell>
-                    <TableCell>{session.start_time}</TableCell>
-                    <TableCell>{session.end_time}</TableCell>
-                    <TableCell>{(() => {
-  // Recalcular as horas usando os horários reais
-  const calculatedHours = calculateHours(session.start_time, session.end_time);
-  const totalMinutes = Math.round(calculatedHours * 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-})()}</TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        session.is_launched 
-                          ? 'bg-green-100 text-green-800' 
-                          : session.is_approved 
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {session.is_launched ? 'Lançado' : session.is_approved ? 'Aprovado' : 'Pendente'}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {session.is_substitution && (
-                        <span className="text-orange-600 font-medium">
-                          <AlertCircle className="inline w-4 h-4 mr-1" />
-                          Sim
+              {activeTab === 'atendimentos' ? (
+                mySessionsThisMonth.map(session => {
+                  const patient = patients.find(p => p.id === session.patient_id) || 
+                                 allSectorPatients.find(p => p.id === session.patient_id);
+                  return (
+                    <TableRow key={session.id}>
+                      <TableCell>{patient?.name || 'N/A'}</TableCell>
+                      <TableCell>{new Date(session.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
+                      <TableCell>{session.start_time}</TableCell>
+                      <TableCell>{session.end_time}</TableCell>
+                      <TableCell>{formatHours(session.hours)}</TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          session.is_launched 
+                            ? 'bg-green-100 text-green-800' 
+                            : session.is_approved 
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {session.is_launched ? 'Lançado' : session.is_approved ? 'Aprovado' : 'Pendente'}
                         </span>
-                      )}
+                      </TableCell>
+                      <TableCell>
+                        {session.is_substitution && (
+                          <span className="text-orange-600 font-medium">
+                            <AlertCircle className="inline w-4 h-4 mr-1" />
+                            Sim
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              ) : (
+                mySupervisions.map(supervision => (
+                  <TableRow key={supervision.id}>
+                    <TableCell>{new Date(supervision.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
+                    <TableCell>{supervision.start_time}</TableCell>
+                    <TableCell>{supervision.end_time}</TableCell>
+                    <TableCell>{formatHours(supervision.hours)}</TableCell>
+                    <TableCell>{supervision.sector?.toUpperCase()}</TableCell>
+                    <TableCell>
+                      <div className="max-w-xs truncate" title={supervision.observations}>
+                        {supervision.observations || 'Sem observações'}
+                      </div>
                     </TableCell>
                   </TableRow>
-                );
-              })}
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
