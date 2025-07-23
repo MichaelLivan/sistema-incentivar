@@ -520,11 +520,11 @@ export const FinanceiroDashboard: React.FC = () => {
             {isFinanceiroPct ? 'Financeiro - Cobrança aos Pais' : 'Financeiro - Pagamento aos ATs'}
           </CardTitle>
           {isFinanceiroPct && (
-            <div className="bg-blue-50 p-3 rounded-lg mt-3">
-              <p className="text-sm text-blue-800 font-medium">
-                ✅ <strong>Aguarda apenas confirmação da recepção</strong> - Os pais apenas visualizam os atendimentos.
-              </p>
-            </div>
+//             <div className="bg-blue-50 p-3 rounded-lg mt-3">
+// {/*               <p className="text-sm text-blue-800 font-medium">
+//                 ✅ <strong>Aguarda apenas confirmação da recepção</strong> - Os pais apenas visualizam os atendimentos.
+//               </p> */}
+//             </div>
           )}
         </CardHeader>
         <CardContent>
