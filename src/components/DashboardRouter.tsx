@@ -5,7 +5,6 @@ import { ATDashboard } from './dashboards/ATDashboard';
 import { PaisDashboard } from './dashboards/PaisDashboard';
 import { FinanceiroDashboard } from './dashboards/FinanceiroDashboard';
 import { AdminDashboard } from './dashboards/AdminDashboard';
-import { CoordenacaoDashboard } from './dashboards/CoordenacaoDashboard';
 import { GeneralAdminDashboard } from './dashboards/GeneralAdminDashboard';
 
 export const DashboardRouter: React.FC = () => {
@@ -68,20 +67,12 @@ export const DashboardRouter: React.FC = () => {
         console.log('💰 [DASHBOARD ROUTER] Redirecionando para FinanceiroDashboard (PCT)');
         return <FinanceiroDashboard />;
       
-      // Coordenação
-      case 'coordenacao-aba':
-      case 'coordenacao-denver':
-      case 'coordenacao-escolar':
-      case 'coordenacao-grupo':
-        console.log('👨‍🏫 [DASHBOARD ROUTER] Redirecionando para CoordenacaoDashboard');
-        return <CoordenacaoDashboard />;
-      
-      // Administradores de Setor
+      // Administradores de Setor (incluindo recepção)
       case 'adm-aba':
       case 'adm-denver':
       case 'adm-grupo':
       case 'adm-escolar':
-        console.log('⚙️ [DASHBOARD ROUTER] Redirecionando para AdminDashboard');
+        console.log('⚙️ [DASHBOARD ROUTER] Redirecionando para AdminDashboard (Admin + Recepção)');
         return <AdminDashboard />;
       
       // Administrador Geral
@@ -125,8 +116,9 @@ export const DashboardRouter: React.FC = () => {
                   • AT: at-aba, at-denver, at-grupo, at-escolar<br />
                   • Pais: pais<br />
                   • Financeiro: financeiro-ats, financeiro-pct<br />
-                  • Coordenação: coordenacao-aba, coordenacao-denver, coordenacao-grupo, coordenacao-escolar<br />
-                  • Admin: adm-aba, adm-denver, adm-grupo, adm-escolar, adm-geral
+                  • Admin: adm-aba, adm-denver, adm-grupo, adm-escolar, adm-geral<br />
+                  <br />
+                  <strong>Nota:</strong> O perfil de coordenação foi removido. Os ATs agora lançam suas próprias supervisões.
                 </div>
               </CardContent>
             </Card>
