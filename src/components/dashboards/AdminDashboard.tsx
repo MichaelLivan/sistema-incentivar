@@ -72,7 +72,7 @@ export const AdminDashboard: React.FC = () => {
   const [sessions, setSessions] = useState<any[]>([]);
   const [ats, setAts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('confirmacao'); // 'confirmacao', 'ats', 'pacientes', 'atendimentos'
+  const [activeTab, setActiveTab] = useState('confirmacao'); // 'confirmacao', 'ats', 'pacientes'
   
   // Estados para busca e filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -149,7 +149,7 @@ export const AdminDashboard: React.FC = () => {
     );
   });
 
-  // FUNÇÕES DA RECEPÇÃO - Confirmar atendimentos
+  // FUNÇÕES DA RECEPÇÃO - Confirmar atendimentos (vai direto pro financeiro)
   const handleConfirmSession = async (sessionId: string) => {
     try {
       await apiService.confirmSession(sessionId);
@@ -382,31 +382,7 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleApproveSession = async (sessionId: string) => {
-    try {
-      await apiService.approveSession(sessionId);
-      const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
-      setSessions(sessionsData);
-    } catch (error) {
-      console.error('Erro ao aprovar sessão:', error);
-      alert('Erro ao aprovar sessão');
-    }
-  };
-
-  const handleLaunchSession = async (sessionId: string) => {
-    try {
-      await apiService.launchSession(sessionId);
-      const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
-      setSessions(sessionsData);
-    } catch (error) {
-      console.error('Erro ao lançar sessão:', error);
-      alert('Erro ao lançar sessão');
-    }
-  };
-
   const pendingSessions = filteredSessions.filter(s => !s.is_confirmed);
-  const confirmedSessions = filteredSessions.filter(s => s.is_confirmed && !s.is_approved);
-  const approvedSessions = filteredSessions.filter(s => s.is_approved && !s.is_launched);
   const totalHours = filteredSessions.reduce((sum, s) => sum + calculateHours(s.start_time, s.end_time), 0);
 
   // Verificar alertas de carga horária
@@ -463,6 +439,11 @@ export const AdminDashboard: React.FC = () => {
           <p className="text-gray-600">
             Gerencie atendimentos, ATs e pacientes do setor {userSector?.toUpperCase()}.
           </p>
+          <div className="bg-green-50 p-3 rounded-lg mt-3">
+            <p className="text-sm text-green-800 font-medium">
+              ✅ <strong>Fluxo Simplificado:</strong> Confirme os atendimentos e eles irão automaticamente para o financeiro.
+            </p>
+          </div>
         </CardHeader>
       </Card>
 
@@ -541,8 +522,8 @@ export const AdminDashboard: React.FC = () => {
         
         <Card>
           <CardContent className="flex items-center space-x-4">
-            <div className="p-3 bg-yellow-100 rounded-lg">
-              <Calendar className="w-6 h-6 text-yellow-600" />
+            <div className="p-3 bg-orange-100 rounded-lg">
+              <Calendar className="w-6 h-6 text-orange-600" />
             </div>
             <div>
               <p className="text-sm text-gray-600">Pendentes</p>
@@ -595,15 +576,6 @@ export const AdminDashboard: React.FC = () => {
               <Users className="w-4 h-4" />
               <span>Gerenciar Pacientes</span>
             </Button>
-            <Button
-              onClick={() => setActiveTab('atendimentos')}
-              variant={activeTab === 'atendimentos' ? 'primary' : 'secondary'}
-              size="sm"
-              className="flex items-center space-x-2"
-            >
-              <Calendar className="w-4 h-4" />
-              <span>Gerenciar Atendimentos</span>
-            </Button>
           </div>
         </CardHeader>
       </Card>
@@ -645,12 +617,12 @@ export const AdminDashboard: React.FC = () => {
       {activeTab === 'confirmacao' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-orange-600">
-              <Clock className="inline w-5 h-5 mr-2" />
-              Atendimentos Pendentes de Confirmação
+            <CardTitle className="text-green-600">
+              <CheckCircle className="inline w-5 h-5 mr-2" />
+              Confirmar Atendimentos (Vai Direto para Financeiro)
             </CardTitle>
             <p className="text-sm text-gray-600 mt-2">
-              Confirme os atendimentos abaixo para que sejam enviados automaticamente ao financeiro.
+              ✅ Confirme os atendimentos abaixo. Eles irão automaticamente para o financeiro sem precisar de aprovação.
             </p>
           </CardHeader>
           <CardContent>
@@ -702,7 +674,7 @@ export const AdminDashboard: React.FC = () => {
                             size="sm"
                             variant="success"
                             onClick={() => handleConfirmSession(session.id)}
-                            title="Confirmar atendimento"
+                            title="Confirmar e enviar para financeiro"
                           >
                             <CheckCircle size={14} />
                           </Button>
@@ -1083,117 +1055,6 @@ export const AdminDashboard: React.FC = () => {
                 })}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ABA: Gerenciar Atendimentos */}
-      {activeTab === 'atendimentos' && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Gerenciar Atendimentos</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-6">
-              {/* Atendimentos Confirmados para Aprovação */}
-              <div>
-                <h3 className="text-lg font-semibold text-purple-800 mb-3">Atendimentos Confirmados para Aprovação</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHeadCell>Paciente</TableHeadCell>
-                      <TableHeadCell>AT</TableHeadCell>
-                      <TableHeadCell>Data</TableHeadCell>
-                      <TableHeadCell>Horas</TableHeadCell>
-                      <TableHeadCell>Observações</TableHeadCell>
-                      <TableHeadCell>Ações</TableHeadCell>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {confirmedSessions.map(session => {
-                      const patient = patients.find(p => p.id === session.patient_id);
-                      const at = ats.find(a => a.id === session.at_id);
-                      
-                      return (
-                        <TableRow key={session.id}>
-                          <TableCell>{patient?.name || 'N/A'}</TableCell>
-                          <TableCell>{at?.name || 'N/A'}</TableCell>
-                          <TableCell>{formatDateBR(session.date)}</TableCell>
-                          <TableCell>{formatSessionHours(session.hours)}</TableCell>
-                          <TableCell>
-                            <div className="max-w-xs truncate" title={session.observations}>
-                              {session.observations || 'Sem observações'}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm"
-                              variant="success"
-                              onClick={() => handleApproveSession(session.id)}
-                            >
-                              <CheckCircle size={14} />
-                              Aprovar
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-                
-                {confirmedSessions.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    <p>Nenhum atendimento confirmado aguardando aprovação</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Atendimentos Aprovados para Lançamento */}
-              <div>
-                <h3 className="text-lg font-semibold text-purple-800 mb-3">Atendimentos Aprovados para Lançamento</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHeadCell>Paciente</TableHeadCell>
-                      <TableHeadCell>AT</TableHeadCell>
-                      <TableHeadCell>Data</TableHeadCell>
-                      <TableHeadCell>Horas</TableHeadCell>
-                      <TableHeadCell>Ações</TableHeadCell>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {approvedSessions.map(session => {
-                      const patient = patients.find(p => p.id === session.patient_id);
-                      const at = ats.find(a => a.id === session.at_id);
-                      
-                      return (
-                        <TableRow key={session.id}>
-                          <TableCell>{patient?.name || 'N/A'}</TableCell>
-                          <TableCell>{at?.name || 'N/A'}</TableCell>
-                          <TableCell>{formatDateBR(session.date)}</TableCell>
-                          <TableCell>{formatSessionHours(session.hours)}</TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              onClick={() => handleLaunchSession(session.id)}
-                            >
-                              Lançar
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-                
-                {approvedSessions.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    <p>Nenhum atendimento aprovado aguardando lançamento</p>
-                  </div>
-                )}
-              </div>
-            </div>
           </CardContent>
         </Card>
       )}
