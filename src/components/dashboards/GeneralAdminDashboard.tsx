@@ -401,7 +401,7 @@ export const GeneralAdminDashboard: React.FC = () => {
                     onChange={handleInputChange}
                     required
                   >
-                    <optgroup label="Acompanhantes Terapêuticos">
+<optgroup label="Acompanhantes Terapêuticos">
                       <option value="at-aba">AT - ABA</option>
                       <option value="at-denver">AT - Denver</option>
                       <option value="at-grupo">AT - Grupo</option>
