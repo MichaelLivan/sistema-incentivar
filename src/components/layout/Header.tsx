@@ -34,10 +34,6 @@ export const Header: React.FC = () => {
       'at-grupo': 'AT - Grupo',
       'at-escolar': 'AT - Escolar',
       'pais': 'Pais / Responsável',
-      'coordenacao-aba': 'Coordenação - ABA',
-      'coordenacao-denver': 'Coordenação - Denver',
-      'coordenacao-escolar': 'Coordenação - Escolar',
-      'coordenacao-grupo': 'Coordenação - Grupo',
       'adm-aba': 'Administração - ABA',
       'adm-denver': 'Administração - Denver',
       'adm-grupo': 'Administração - Grupo',
@@ -56,8 +52,6 @@ export const Header: React.FC = () => {
     setShowMobileMenu(false);
     setShowChangePassword(true);
   };
-
-   
 
   return (
     <header className="bg-purple-700 text-white shadow-2xl relative">
@@ -143,9 +137,9 @@ export const Header: React.FC = () => {
           )}
         </div>
 
-       {/* Mobile Dropdown Menu */}
-{user && showMobileMenu && (
-  <div className="md:hidden mt-3 pt-3 border-t border-purple-600 space-y-3 relative z-50">
+        {/* Mobile Dropdown Menu */}
+        {user && showMobileMenu && (
+          <div className="md:hidden mt-3 pt-3 border-t border-purple-600 space-y-3 relative z-50">
             {/* User Info Completa */}
             <div className="bg-purple-600 bg-opacity-50 rounded-lg p-3">
               <div className="flex items-center space-x-2 mb-1">
