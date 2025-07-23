@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableHeadCell } from '../ui/Table';
+import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } from '../ui/Table';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import { Clock, CheckCircle, User, Calendar } from 'lucide-react';
+import { Clock, User, Calendar, Eye } from 'lucide-react';
 import { formatHours, formatDateBR, calculateHours } from '../../utils/formatters';
 
 export const PaisDashboard: React.FC = () => {
   const { user } = useAuth();
   const [patients, setPatients] = useState([]);
-  
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -18,30 +16,16 @@ export const PaisDashboard: React.FC = () => {
     const loadData = async () => {
       try {
         setLoading(true);
-        console.log('🔄 [PAIS DASHBOARD] Carregando dados...');
-        console.log('👤 [PAIS DASHBOARD] Usuário logado:', {
-          id: user?.id,
-          email: user?.email,
-          name: user?.name,
-          type: user?.type
-        });
-
-       const [patientsData, sessionsData] = await Promise.all([
-  apiService.getPatients(),
-  apiService.getSessions()
-]);
-
-
-        console.log('📋 [PAIS DASHBOARD] Pacientes carregados:', patientsData);
-        console.log('📅 [PAIS DASHBOARD] Sessões carregadas:', sessionsData);
-        console.log('👨‍⚕️ [PAIS DASHBOARD] ATs incluídos nas sessões');
-
+        const [patientsData, sessionsData] = await Promise.all([
+          apiService.getPatients(),
+          apiService.getSessions()
+        ]);
 
         setPatients(patientsData);
         setSessions(sessionsData);
         
       } catch (error) {
-        console.error('❌ [PAIS DASHBOARD] Erro ao carregar dados:', error);
+        console.error('❌ Erro ao carregar dados:', error);
       } finally {
         setLoading(false);
       }
@@ -53,44 +37,19 @@ export const PaisDashboard: React.FC = () => {
   const myChildren = patients.filter(patient => {
     const isMainParent = patient.parent_email === user?.email;
     const isSecondParent = patient.parent_email2 === user?.email;
-
-    console.log(`🔍 [PAIS DASHBOARD] Verificando paciente ${patient.name}:`, {
-      parentEmail: patient.parent_email,
-      parentEmail2: patient.parent_email2,
-      userEmail: user?.email,
-      isMainParent,
-      isSecondParent
-    });
-
     return isMainParent || isSecondParent;
   });
 
-  console.log('👶 [PAIS DASHBOARD] Meus filhos encontrados:', myChildren);
   const myChildrenIds = myChildren.map(c => c.id);
-  console.log('🆔 [PAIS DASHBOARD] IDs dos meus filhos:', myChildrenIds);
-
   const myChildrenSessions = sessions.filter(session => 
     myChildrenIds.includes(session.patient_id)
   );
-
-  console.log('📋 [PAIS DASHBOARD] Sessões dos meus filhos (aprovadas):', myChildrenSessions);
-
-  const handleConfirmSession = async (sessionId: string) => {
-    try {
-      await apiService.confirmSession(sessionId);
-      const sessionsData = await apiService.getSessions();
-      setSessions(sessionsData);
-    } catch (error) {
-      console.error('Erro ao confirmar sessão:', error);
-      alert('Erro ao confirmar atendimento');
-    }
-  };
 
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
 
   const thisMonthSessions = myChildrenSessions.filter(s => {
-    const sessionDate = new Date(s.date + 'T00:00:00'); // CORREÇÃO: Adicionar timezone
+    const sessionDate = new Date(s.date + 'T00:00:00');
     return sessionDate.getMonth() === currentMonth && sessionDate.getFullYear() === currentYear;
   });
 
@@ -110,6 +69,7 @@ export const PaisDashboard: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
+      {/* Cards de Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="flex items-center space-x-4">
@@ -138,7 +98,7 @@ export const PaisDashboard: React.FC = () => {
         <Card>
           <CardContent className="flex items-center space-x-4">
             <div className="p-3 bg-green-100 rounded-lg">
-              <CheckCircle className="w-6 h-6 text-green-600" />
+              <Eye className="w-6 h-6 text-green-600" />
             </div>
             <div>
               <p className="text-sm text-gray-600">Confirmados</p>
@@ -153,13 +113,14 @@ export const PaisDashboard: React.FC = () => {
               <Calendar className="w-6 h-6 text-orange-600" />
             </div>
             <div>
-              <p className="text-sm text-gray-600">Pendentes</p>
+              <p className="text-sm text-gray-600">Aguardando</p>
               <p className="text-2xl font-bold text-purple-700">{pendingSessions}</p>
             </div>
           </CardContent>
         </Card>
       </div>
 
+      {/* Informações dos Filhos */}
       <Card>
         <CardHeader>
           <CardTitle>Meus Filhos</CardTitle>
@@ -185,9 +146,23 @@ export const PaisDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Histórico de Atendimentos - APENAS VISUALIZAÇÃO */}
       <Card>
         <CardHeader>
-          <CardTitle>Atendimentos do Mês - {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</CardTitle>
+          <CardTitle>
+            Atendimentos do Mês - {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+          </CardTitle>
+          <div className="bg-blue-50 p-3 rounded-lg mt-3">
+            <div className="flex items-center space-x-2">
+              <Eye className="w-5 h-5 text-blue-600" />
+              <p className="text-sm text-blue-800 font-medium">
+                Visualização dos atendimentos realizados
+              </p>
+            </div>
+            <p className="text-xs text-blue-700 mt-1">
+              A confirmação dos atendimentos é feita pela recepção da clínica.
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -201,7 +176,6 @@ export const PaisDashboard: React.FC = () => {
                 <TableHeadCell>Horas</TableHeadCell>
                 <TableHeadCell>Observações</TableHeadCell>
                 <TableHeadCell>Status</TableHeadCell>
-                <TableHeadCell>Ação</TableHeadCell>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -231,21 +205,8 @@ export const PaisDashboard: React.FC = () => {
                           ? 'bg-green-100 text-green-800' 
                           : 'bg-yellow-100 text-yellow-800'
                       }`}>
-                        {session.is_confirmed ? 'Confirmado' : 'Pendente'}
+                        {session.is_confirmed ? '✅ Confirmado' : '⏳ Aguardando Confirmação'}
                       </span>
-                    </TableCell>
-                    <TableCell>
-                      {!session.is_confirmed && (
-                        <Button
-                          onClick={() => handleConfirmSession(session.id)}
-                          variant="success"
-                          size="sm"
-                          className="flex items-center space-x-1"
-                        >
-                          <CheckCircle size={16} />
-                          <span>Confirmar</span>
-                        </Button>
-                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -255,7 +216,8 @@ export const PaisDashboard: React.FC = () => {
 
           {thisMonthSessions.length === 0 && (
             <div className="text-center py-8 text-gray-500">
-              Nenhum atendimento encontrado para este mês.
+              <Eye className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+              <p>Nenhum atendimento encontrado para este mês.</p>
             </div>
           )}
         </CardContent>
