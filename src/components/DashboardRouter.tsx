@@ -80,6 +80,14 @@ export const DashboardRouter: React.FC = () => {
         console.log('🔧 [DASHBOARD ROUTER] Redirecionando para GeneralAdminDashboard');
         return <GeneralAdminDashboard />;
       
+      // COORDENAÇÃO REMOVIDA - Redirecionar para dashboard de admin
+      case 'coordenacao-aba':
+      case 'coordenacao-denver':
+      case 'coordenacao-grupo':
+      case 'coordenacao-escolar':
+        console.log('⚠️ [DASHBOARD ROUTER] Perfil de coordenação removido - redirecionando para AdminDashboard');
+        return <AdminDashboard />;
+      
       // Tipo de usuário não reconhecido
       default:
         console.error('❌ [DASHBOARD ROUTER] Tipo de usuário não reconhecido:', user.type);
