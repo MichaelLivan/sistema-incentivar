@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } fro
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { Clock, Calendar, User, AlertCircle, X, Search, BookOpen, Users } from 'lucide-react';
-import { formatHours } from '../../utils/formatters';
+import { formatHours, calculateHours, sumSessionHours, sumHoursSafely } from '../../utils/formatters';
 
 export const ATDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -88,21 +88,6 @@ export const ATDashboard: React.FC = () => {
     patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     patient.sector.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  // ✅ CORREÇÃO PRINCIPAL: Função de cálculo de horas PRECISA
-  const calculateHours = (start, end) => {
-    if (!start || !end) return 0;
-    const startParts = start.split(':');
-    const endParts = end.split(':');
-    const startHour = parseInt(startParts[0]) || 0;
-    const startMin = parseInt(startParts[1]) || 0;
-    const endHour = parseInt(endParts[0]) || 0;
-    const endMin = parseInt(endParts[1]) || 0;
-    const startTotalMinutes = startHour * 60 + startMin;
-    const endTotalMinutes = endHour * 60 + endMin;
-    const diffMinutes = Math.max(0, endTotalMinutes - startTotalMinutes);
-    return diffMinutes / 60;
-  };
 
   // Handlers para Atendimentos
   const handleSessionInputChange = (e) => {
@@ -251,13 +236,13 @@ const handleSupervisionSubmit = async (e) => {
     }
   };
 
-  // ✅ CORREÇÃO PRINCIPAL: Calcular horas CORRETAMENTE
+  // ✅ CORREÇÃO PRINCIPAL: Calcular horas com precisão e soma correta
   const currentHours = calculateHours(
     activeTab === 'atendimentos' ? sessionForm.startTime : supervisionForm.startTime,
     activeTab === 'atendimentos' ? sessionForm.endTime : supervisionForm.endTime
   );
 
-  // ✅ CORREÇÃO: Filtrar sessões e supervisões do mês atual
+  // ✅ CORREÇÃO: Filtrar sessões e supervisões do mês atual com precisão
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
@@ -276,31 +261,23 @@ const handleSupervisionSubmit = async (e) => {
            supervisionDate.getFullYear() === currentYear;
   });
 
-  // ✅ CORREÇÃO PRINCIPAL: Calcular horas com precisão MÁXIMA
-  const sessionHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => {
-    // SEMPRE calcular pela diferença de tempo para máxima precisão
-    const calculatedHours = calculateHours(s.start_time, s.end_time);
-    console.log(`📊 Sessão ${s.id.substring(0,8)}: ${s.start_time}-${s.end_time} = ${calculatedHours.toFixed(4)}h`);
-    return sum + calculatedHours;
-  }, 0);
+  // ✅ CORREÇÃO PRINCIPAL: Usar funções precisas para cálculo de horas
+  const sessionHoursThisMonth = sumSessionHours(mySessionsThisMonth);
+  
+  // Para supervisões, usar função específica
+  const supervisionHoursArray = mySupervisionsThisMonth.map(s => {
+    // Preferir campo hours se existir, senão calcular
+    return s.hours || calculateHours(s.start_time, s.end_time);
+  });
+  const supervisionHoursThisMonth = sumHoursSafely(supervisionHoursArray);
 
-  const supervisionHoursThisMonth = mySupervisionsThisMonth.reduce((sum, s) => {
-    // Usar o campo hours salvo OU calcular se não existir
-    const supervisionHours = s.hours !== null && s.hours !== undefined 
-      ? parseFloat(s.hours) 
-      : calculateHours(s.start_time, s.end_time);
-    
-    console.log(`👨‍🏫 Supervisão ${s.id.substring(0,8)}: ${s.start_time}-${s.end_time} = ${supervisionHours.toFixed(4)}h`);
-    return sum + supervisionHours;
-  }, 0);
-
-  // ✅ CORREÇÃO FINAL: Somar ATENDIMENTOS + SUPERVISÕES corretamente
+  // ✅ SOMA FINAL CORRIGIDA: Atendimentos + Supervisões
   const totalHoursThisMonth = sessionHoursThisMonth + supervisionHoursThisMonth;
 
-  console.log('🧮 RESUMO DE HORAS FINAL:', {
-    sessionHours: sessionHoursThisMonth.toFixed(4),
-    supervisionHours: supervisionHoursThisMonth.toFixed(4),
-    totalHours: totalHoursThisMonth.toFixed(4),
+  console.log('📊 CÁLCULO DE HORAS DETALHADO:', {
+    sessionHoursThisMonth: sessionHoursThisMonth.toFixed(4),
+    supervisionHoursThisMonth: supervisionHoursThisMonth.toFixed(4),
+    totalHoursThisMonth: totalHoursThisMonth.toFixed(4),
     sessionsCount: mySessionsThisMonth.length,
     supervisionsCount: mySupervisionsThisMonth.length
   });
@@ -817,9 +794,7 @@ const handleSupervisionSubmit = async (e) => {
               ) : (
                 mySupervisionsThisMonth.map(supervision => {
                   // ✅ USAR CÁLCULO PRECISO para exibição das supervisões também
-                  const supervisionHours = supervision.hours !== null && supervision.hours !== undefined
-                    ? parseFloat(supervision.hours)
-                    : calculateHours(supervision.start_time, supervision.end_time);
+                  const supervisionHours = supervision.hours || calculateHours(supervision.start_time, supervision.end_time);
                   
                   return (
                     <TableRow key={supervision.id}>
