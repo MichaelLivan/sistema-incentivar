@@ -207,7 +207,7 @@ export const FinanceiroDashboard: React.FC = () => {
            supervisionDate.getFullYear() === selectedYear;
   }) : [];
 
-  // Relatório financeiro para PACIENTES (financeiro-pct)
+  // Relatório financeiro para PACIENTES (financeiro-pct) - CORRIGIDO
   const getPatientFinancialReport = (): PatientFinancialReport[] => {
     if (!isFinanceiroPct || !Array.isArray(thisMonthSessions) || !Array.isArray(patients) || !Array.isArray(ats)) {
       return [];
@@ -231,6 +231,9 @@ export const FinanceiroDashboard: React.FC = () => {
       };
 
       const at = ats.find(a => a.id === patient.at_id);
+      
+      // ✅ CORREÇÃO: Financeiro PCT não espera confirmação dos pais
+      // Apenas considera se foi confirmado pela recepção (is_confirmed = true)
       const confirmedSessions = sessions.filter(s => s.is_confirmed);
       const pendingSessions = sessions.filter(s => !s.is_confirmed);
 
@@ -243,6 +246,7 @@ export const FinanceiroDashboard: React.FC = () => {
       const pendingValue = pendingHours * hourlyRate;
       const totalValue = totalHours * hourlyRate;
 
+      // Taxa de confirmação baseada na recepção, não nos pais
       const confirmationRate = sessions.length > 0 ? (confirmedSessions.length / sessions.length) * 100 : 0;
 
       return {
@@ -515,6 +519,13 @@ export const FinanceiroDashboard: React.FC = () => {
           <CardTitle>
             {isFinanceiroPct ? 'Financeiro - Cobrança aos Pais' : 'Financeiro - Pagamento aos ATs'}
           </CardTitle>
+          {isFinanceiroPct && (
+            <div className="bg-blue-50 p-3 rounded-lg mt-3">
+              <p className="text-sm text-blue-800 font-medium">
+                ✅ <strong>Aguarda apenas confirmação da recepção</strong> - Os pais apenas visualizam os atendimentos.
+              </p>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4 items-center">
@@ -768,7 +779,7 @@ export const FinanceiroDashboard: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         <div className="w-4 h-4 bg-green-500 rounded"></div>
-                        <span className="text-sm">Confirmado</span>
+                        <span className="text-sm">Confirmado (Recepção)</span>
                       </div>
                       <div className="text-right">
                         <div className="font-semibold">{formatCurrency(totalConfirmedRevenue)}</div>
@@ -778,7 +789,7 @@ export const FinanceiroDashboard: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
                         <div className="w-4 h-4 bg-orange-500 rounded"></div>
-                        <span className="text-sm">Pendente</span>
+                        <span className="text-sm">Pendente (Recepção)</span>
                       </div>
                       <div className="text-right">
                         <div className="font-semibold">{formatCurrency(totalPendingRevenue)}</div>
@@ -896,11 +907,11 @@ export const FinanceiroDashboard: React.FC = () => {
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                   <h4 className="font-semibold text-green-800 mb-2">💰 Total a Cobrar (Confirmado)</h4>
                   <p className="text-3xl font-bold text-green-600">{formatCurrency(totalConfirmedRevenue)}</p>
-                  <p className="text-sm text-green-700">{formatHours(totalConfirmedHours)} confirmadas</p>
+                  <p className="text-sm text-green-700">{formatHours(totalConfirmedHours)} confirmadas pela recepção</p>
                 </div>
                 
                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                  <h4 className="font-semibold text-orange-800 mb-2">⏳ Aguardando Confirmação</h4>
+                  <h4 className="font-semibold text-orange-800 mb-2">⏳ Aguardando Recepção</h4>
                   <p className="text-3xl font-bold text-orange-600">{formatCurrency(totalPendingRevenue)}</p>
                   <p className="text-sm text-orange-700">{formatHours(totalPendingHours)} pendentes</p>
                 </div>
@@ -934,7 +945,7 @@ export const FinanceiroDashboard: React.FC = () => {
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <p className="text-red-800">
                     <strong>{riskPatients} paciente(s)</strong> com muitas horas pendentes (&gt;10h) ou baixa taxa de confirmação (&lt;50%).
-                    É necessário entrar em contato com os responsáveis.
+                    É necessário entrar em contato com a recepção.
                   </p>
                 </div>
               </CardContent>
