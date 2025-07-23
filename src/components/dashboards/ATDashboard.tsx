@@ -45,6 +45,7 @@ export const ATDashboard: React.FC = () => {
 
   const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [supervisionSubmitting, setSupervisionSubmitting] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -164,6 +165,8 @@ export const ATDashboard: React.FC = () => {
           observations: '',
           isSubstitution: false,
         });
+
+        alert('Atendimento registrado com sucesso!');
       } catch (error) {
         console.error('Erro ao criar sessão:', error);
         alert('Erro ao registrar atendimento');
@@ -173,43 +176,72 @@ export const ATDashboard: React.FC = () => {
     createSession();
   };
 
-  // Handlers para Supervisões
+  // Handlers para Supervisões - CORRIGIDO
   const handleSupervisionInputChange = (e) => {
     const { name, value } = e.target;
     setSupervisionForm(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSupervisionSubmit = (e) => {
+  const handleSupervisionSubmit = async (e) => {
     e.preventDefault();
     
-    const createSupervision = async () => {
-      try {
-        await apiService.createSupervision({
-          at_id: user.id, // O próprio AT lança sua supervisão
-          start_time: supervisionForm.startTime,
-          end_time: supervisionForm.endTime,
-          date: supervisionForm.date,
-          observations: supervisionForm.observations
-        });
-        
-        const supervisionsData = await apiService.getSupervisions();
-        setSupervisions(supervisionsData);
-        
-        setSupervisionForm({
-          startTime: '',
-          endTime: '',
-          date: new Date().toISOString().split('T')[0],
-          observations: '',
-        });
-        
-        alert('Supervisão lançada com sucesso!');
-      } catch (error) {
-        console.error('Erro ao criar supervisão:', error);
-        alert('Erro ao lançar supervisão');
-      }
-    };
+    if (!supervisionForm.startTime || !supervisionForm.endTime || !supervisionForm.date) {
+      alert('Por favor, preencha todos os campos obrigatórios');
+      return;
+    }
 
-    createSupervision();
+    const hours = calculateHours(supervisionForm.startTime, supervisionForm.endTime);
+    if (hours <= 0) {
+      alert('Horário de fim deve ser posterior ao horário de início');
+      return;
+    }
+
+    setSupervisionSubmitting(true);
+    
+    try {
+      console.log('📤 Enviando supervisão para o banco:', {
+        at_id: user.id,
+        start_time: supervisionForm.startTime,
+        end_time: supervisionForm.endTime,
+        date: supervisionForm.date,
+        observations: supervisionForm.observations
+      });
+
+      await apiService.createSupervision({
+        at_id: user.id, // O próprio AT lança sua supervisão
+        start_time: supervisionForm.startTime,
+        end_time: supervisionForm.endTime,
+        date: supervisionForm.date,
+        observations: supervisionForm.observations
+      });
+      
+      // Recarregar supervisões
+      const supervisionsData = await apiService.getSupervisions();
+      setSupervisions(supervisionsData);
+      
+      // Limpar formulário
+      setSupervisionForm({
+        startTime: '',
+        endTime: '',
+        date: new Date().toISOString().split('T')[0],
+        observations: '',
+      });
+      
+      alert('✅ Supervisão lançada com sucesso! Vai automaticamente para o financeiro.');
+      
+    } catch (error) {
+      console.error('❌ Erro ao criar supervisão:', error);
+      
+      // Mensagem de erro mais detalhada
+      let errorMessage = 'Erro ao lançar supervisão';
+      if (error.message) {
+        errorMessage += ': ' + error.message;
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setSupervisionSubmitting(false);
+    }
   };
 
   // Estatísticas
@@ -559,7 +591,7 @@ export const ATDashboard: React.FC = () => {
         </Card>
       )}
 
-      {/* Formulário de Supervisão */}
+      {/* Formulário de Supervisão - CORRIGIDO */}
       {activeTab === 'supervisoes' && (
         <Card>
           <CardHeader>
@@ -568,6 +600,9 @@ export const ATDashboard: React.FC = () => {
               <p className="text-sm text-green-800 font-medium">
                 🚀 Registre suas horas de supervisão que serão automaticamente enviadas ao financeiro.
               </p>
+              <p className="text-xs text-green-700 mt-1">
+                Não precisa mais de coordenador - você lança diretamente!
+              </p>
             </div>
           </CardHeader>
           <CardContent>
@@ -575,7 +610,7 @@ export const ATDashboard: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Data
+                    Data *
                   </label>
                   <Input
                     type="date"
@@ -588,7 +623,7 @@ export const ATDashboard: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Início
+                    Hora Início *
                   </label>
                   <Input
                     type="time"
@@ -601,7 +636,7 @@ export const ATDashboard: React.FC = () => {
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Fim
+                    Hora Fim *
                   </label>
                   <Input
                     type="time"
@@ -638,8 +673,19 @@ export const ATDashboard: React.FC = () => {
                 </div>
               )}
 
-              <Button type="submit" className="w-full">
-                Lançar Supervisão
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={supervisionSubmitting}
+              >
+                {supervisionSubmitting ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Lançando...</span>
+                  </div>
+                ) : (
+                  'Lançar Supervisão'
+                )}
               </Button>
             </form>
           </CardContent>
@@ -697,9 +743,13 @@ export const ATDashboard: React.FC = () => {
                             ? 'bg-green-100 text-green-800' 
                             : session.is_approved 
                               ? 'bg-blue-100 text-blue-800'
-                              : 'bg-yellow-100 text-yellow-800'
+                              : session.is_confirmed
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-800'
                         }`}>
-                          {session.is_launched ? 'Lançado' : session.is_approved ? 'Aprovado' : 'Pendente'}
+                          {session.is_launched ? 'Lançado' : 
+                           session.is_approved ? 'Aprovado' : 
+                           session.is_confirmed ? 'Confirmado' : 'Pendente'}
                         </span>
                       </TableCell>
                       <TableCell>
@@ -731,6 +781,14 @@ export const ATDashboard: React.FC = () => {
               )}
             </TableBody>
           </Table>
+
+          {((activeTab === 'atendimentos' && mySessionsThisMonth.length === 0) || 
+            (activeTab === 'supervisoes' && mySupervisions.length === 0)) && (
+            <div className="text-center py-8 text-gray-500">
+              <BookOpen className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+              <p>Nenhum {activeTab === 'atendimentos' ? 'atendimento' : 'supervisão'} registrado para este mês.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
       
