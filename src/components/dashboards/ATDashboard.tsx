@@ -250,28 +250,45 @@ const handleSupervisionSubmit = async (e) => {
     }
   };
 
-  // ✅ CORREÇÃO PRINCIPAL: Calcular total de horas incluindo atendimentos E supervisões
+  // ✅ CORREÇÃO PRINCIPAL: Calcular horas CORRETAMENTE
   const currentHours = calculateHours(
     activeTab === 'atendimentos' ? sessionForm.startTime : supervisionForm.startTime,
     activeTab === 'atendimentos' ? sessionForm.endTime : supervisionForm.endTime
   );
 
-  const mySessionsThisMonth = sessions.filter(s => 
-    s.at_id === user?.id && 
-    new Date(s.date).getMonth() === new Date().getMonth()
-  );
+  // ✅ CORREÇÃO: Filtrar sessões e supervisões do mês atual
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth();
+  const currentYear = currentDate.getFullYear();
 
-  const mySupervisions = supervisions.filter(s => s.at_id === user?.id);
-  
-  // ✅ NOVO: Calcular supervisões do mês atual
-  const mySupervisionsThisMonth = mySupervisions.filter(s => 
-    new Date(s.date).getMonth() === new Date().getMonth() &&
-    new Date(s.date).getFullYear() === new Date().getFullYear()
-  );
+  const mySessionsThisMonth = sessions.filter(s => {
+    const sessionDate = new Date(s.date + 'T00:00:00');
+    return s.at_id === user?.id && 
+           sessionDate.getMonth() === currentMonth &&
+           sessionDate.getFullYear() === currentYear;
+  });
 
-  // ✅ CORREÇÃO: Somar horas de atendimentos E supervisões do mês
-  const sessionHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => sum + s.hours, 0);
-  const supervisionHoursThisMonth = mySupervisionsThisMonth.reduce((sum, s) => sum + s.hours, 0);
+  const mySupervisionsThisMonth = supervisions.filter(s => {
+    const supervisionDate = new Date(s.date + 'T00:00:00');
+    return s.at_id === user?.id &&
+           supervisionDate.getMonth() === currentMonth &&
+           supervisionDate.getFullYear() === currentYear;
+  });
+
+  // ✅ CORREÇÃO PRINCIPAL: Calcular horas com precisão
+  const sessionHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => {
+    // Calcular horas pela diferença de tempo, não pelo campo hours
+    const calculatedHours = calculateHours(s.start_time, s.end_time);
+    return sum + calculatedHours;
+  }, 0);
+
+  const supervisionHoursThisMonth = mySupervisionsThisMonth.reduce((sum, s) => {
+    // Usar o campo hours salvo ou calcular se não existir
+    const supervisionHours = s.hours || calculateHours(s.start_time, s.end_time);
+    return sum + supervisionHours;
+  }, 0);
+
+  // ✅ CORREÇÃO: Somar ATENDIMENTOS + SUPERVISÕES
   const totalHoursThisMonth = sessionHoursThisMonth + supervisionHoursThisMonth;
 
   const selectedPatient = allSectorPatients.find(p => p.id === sessionForm.patientId);
@@ -381,7 +398,7 @@ const handleSupervisionSubmit = async (e) => {
         </div>
       )}
 
-      {/* Stats Cards - CORRIGIDOS */}
+      {/* Stats Cards - CORRIGIDOS COM CÁLCULO EXATO */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="flex items-center space-x-4">
@@ -390,9 +407,9 @@ const handleSupervisionSubmit = async (e) => {
             </div>
             <div>
               <p className="text-sm text-gray-600">Total Horas/Mês</p>
-              <p className="text-2xl font-bold text-purple-700">{totalHoursThisMonth.toFixed(1)}h</p>
+              <p className="text-2xl font-bold text-purple-700">{formatHours(totalHoursThisMonth)}</p>
               <p className="text-xs text-gray-500">
-                At: {sessionHoursThisMonth.toFixed(1)}h | Sup: {supervisionHoursThisMonth.toFixed(1)}h
+                At: {formatHours(sessionHoursThisMonth)} | Sup: {formatHours(supervisionHoursThisMonth)}
               </p>
             </div>
           </CardContent>
@@ -747,13 +764,16 @@ const handleSupervisionSubmit = async (e) => {
                 mySessionsThisMonth.map(session => {
                   const patient = patients.find(p => p.id === session.patient_id) || 
                                  allSectorPatients.find(p => p.id === session.patient_id);
+                  // ✅ USAR CÁLCULO PRECISO para exibição
+                  const sessionHours = calculateHours(session.start_time, session.end_time);
+                  
                   return (
                     <TableRow key={session.id}>
                       <TableCell>{patient?.name || 'N/A'}</TableCell>
                       <TableCell>{new Date(session.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
                       <TableCell>{session.start_time}</TableCell>
                       <TableCell>{session.end_time}</TableCell>
-                      <TableCell>{formatHours(session.hours)}</TableCell>
+                      <TableCell>{formatHours(sessionHours)}</TableCell>
                       <TableCell>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                           session.is_launched 
@@ -781,20 +801,25 @@ const handleSupervisionSubmit = async (e) => {
                   );
                 })
               ) : (
-                mySupervisionsThisMonth.map(supervision => (
-                  <TableRow key={supervision.id}>
-                    <TableCell>{new Date(supervision.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
-                    <TableCell>{supervision.start_time}</TableCell>
-                    <TableCell>{supervision.end_time}</TableCell>
-                    <TableCell>{formatHours(supervision.hours)}</TableCell>
-                    <TableCell>{supervision.sector?.toUpperCase()}</TableCell>
-                    <TableCell>
-                      <div className="max-w-xs truncate" title={supervision.observations}>
-                        {supervision.observations || 'Sem observações'}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                mySupervisionsThisMonth.map(supervision => {
+                  // ✅ USAR CÁLCULO PRECISO para exibição das supervisões também
+                  const supervisionHours = supervision.hours || calculateHours(supervision.start_time, supervision.end_time);
+                  
+                  return (
+                    <TableRow key={supervision.id}>
+                      <TableCell>{new Date(supervision.date + 'T00:00:00').toLocaleDateString('pt-BR')}</TableCell>
+                      <TableCell>{supervision.start_time}</TableCell>
+                      <TableCell>{supervision.end_time}</TableCell>
+                      <TableCell>{formatHours(supervisionHours)}</TableCell>
+                      <TableCell>{supervision.sector?.toUpperCase()}</TableCell>
+                      <TableCell>
+                        <div className="max-w-xs truncate" title={supervision.observations}>
+                          {supervision.observations || 'Sem observações'}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
