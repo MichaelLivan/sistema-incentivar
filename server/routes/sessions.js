@@ -71,8 +71,9 @@ router.get('/', authenticateToken, async (req, res) => {
 
       const childrenIds = myChildren.map(child => child.id);
       if (childrenIds.length > 0) {
-        query = query.in('patient_id', childrenIds).eq('is_approved', true);
-        console.log(`👪 Pais - Buscando sessões de ${childrenIds.length} filhos`);
+        // ✅ CORREÇÃO: Pais veem apenas sessões confirmadas
+        query = query.in('patient_id', childrenIds).eq('is_confirmed', true);
+        console.log(`👪 Pais - Buscando sessões CONFIRMADAS de ${childrenIds.length} filhos`);
       } else {
         return res.json([]);
       }
@@ -126,6 +127,7 @@ router.get('/', authenticateToken, async (req, res) => {
           at: session.at?.name,
           horarios: `${session.start_time} - ${session.end_time}`,
           hours_stored: session.hours,
+          is_confirmed: session.is_confirmed,
           is_substitution: session.is_substitution
         });
       });
@@ -224,8 +226,8 @@ router.post('/', authenticateToken, async (req, res) => {
       hours,
       observations: observations || '',
       is_substitution: isSubstitutionReal,  // ✅ true só se for substituição real
+      is_confirmed: false,  // ✅ SEMPRE inicia como false - precisa confirmação da recepção
       is_approved: false,
-      is_confirmed: false,
       is_launched: false
     };
 
@@ -256,6 +258,7 @@ router.post('/', authenticateToken, async (req, res) => {
     console.log(`   AT que atendeu: ${newSession.at?.name} (ID: ${newSession.at_id})`);
     console.log(`   Horas: ${newSession.hours}`);
     console.log(`   É substituição: ${newSession.is_substitution}`);
+    console.log(`   Status confirmação: ${newSession.is_confirmed} (precisa confirmação da recepção)`);
     
     if (isSubstitutionReal && originalATInfo) {
       console.log(`   AT original do paciente: ${originalATInfo.name}`);
@@ -264,7 +267,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // ✅ RESPOSTA COMPLETA
     res.status(201).json({
-      message: 'Sessão cadastrada com sucesso',
+      message: 'Sessão cadastrada com sucesso! Aguarda confirmação da recepção.',
       sessionId: newSession.id,
       session: newSession,
       substitutionInfo: isSubstitutionReal ? {
@@ -276,7 +279,8 @@ router.post('/', authenticateToken, async (req, res) => {
         calculated_hours: hours,
         is_substitution: isSubstitutionReal,
         at_who_attended: newSession.at?.name,
-        at_id_used: atId
+        at_id_used: atId,
+        needs_confirmation: true
       }
     });
 
@@ -358,18 +362,46 @@ router.put('/:id', authenticateToken, async (req, res) => {
 });
 
 // =====================================================
-// PATCH SESSIONS - Confirmar sessão (pais)
+// PATCH SESSIONS - Confirmar sessão (recepção) - CORRIGIDA
 // =====================================================
 router.patch('/:id/confirm', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (req.user.type !== 'pais') {
-      return res.status(403).json({ message: 'Apenas responsáveis podem confirmar sessões' });
+    // ✅ CORREÇÃO: Permitir admin-* confirmar (recepção)
+    const allowedTypes = [
+      'adm-geral', 'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar',
+      'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo'
+    ];
+
+    if (!allowedTypes.includes(req.user.type)) {
+      console.error(`❌ Tipo de usuário não autorizado para confirmar: ${req.user.type}`);
+      return res.status(403).json({ 
+        message: 'Apenas a recepção (administradores) pode confirmar atendimentos',
+        userType: req.user.type 
+      });
     }
 
-    console.log(`👪 Confirmando sessão ${id} pelo responsável ${req.user.name}`);
+    console.log(`👨‍💼 CONFIRMANDO sessão ${id} por ${req.user.name} (${req.user.type})`);
 
+    // ✅ VERIFICAR SE A SESSÃO EXISTE ANTES DE CONFIRMAR
+    const { data: existingSession, error: checkError } = await supabase
+      .from('sessions')
+      .select('id, is_confirmed, patient_id, at_id')
+      .eq('id', id)
+      .single();
+
+    if (checkError || !existingSession) {
+      console.error('❌ Sessão não encontrada:', checkError);
+      return res.status(404).json({ message: 'Atendimento não encontrado' });
+    }
+
+    if (existingSession.is_confirmed) {
+      console.log('⚠️ Sessão já estava confirmada');
+      return res.status(400).json({ message: 'Este atendimento já foi confirmado' });
+    }
+
+    // ✅ CONFIRMAR A SESSÃO
     const { data: updatedSession, error } = await supabase
       .from('sessions')
       .update({ 
@@ -380,29 +412,40 @@ router.patch('/:id/confirm', authenticateToken, async (req, res) => {
       .eq('id', id)
       .select(`
         *,
-        patient:patients!sessions_patient_id_fkey(name),
-        at:users!sessions_at_id_fkey(name)
+        patient:patients!sessions_patient_id_fkey(name, sector),
+        at:users!sessions_at_id_fkey(name, sector)
       `)
       .single();
 
     if (error) {
       console.error('❌ Erro ao confirmar sessão:', error);
-      return res.status(500).json({ message: 'Erro ao confirmar sessão' });
+      return res.status(500).json({ 
+        message: 'Erro ao confirmar sessão',
+        error: error.message 
+      });
     }
 
-    console.log(`✅ Sessão confirmada pelo responsável:`, {
+    console.log(`✅ Sessão confirmada com sucesso:`, {
       session_id: updatedSession.id,
       patient: updatedSession.patient?.name,
-      at: updatedSession.at?.name
+      at: updatedSession.at?.name,
+      confirmed_by: req.user.name,
+      confirmed_at: updatedSession.confirmed_at
     });
 
     res.json({ 
-      message: 'Sessão confirmada com sucesso', 
-      session: updatedSession 
+      message: 'Atendimento confirmado com sucesso! Agora está visível para os pais.', 
+      session: updatedSession,
+      action: 'confirmed',
+      confirmed_by: req.user.name,
+      confirmed_at: updatedSession.confirmed_at
     });
   } catch (error) {
-    console.error('❌ Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error('❌ Erro interno ao confirmar sessão:', error);
+    res.status(500).json({ 
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    });
   }
 });
 
@@ -528,7 +571,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const { data: existingSession, error: checkError } = await supabase
       .from('sessions')
       .select(`
-        id, date, hours, is_substitution,
+        id, date, hours, is_substitution, is_confirmed,
         patient:patients!sessions_patient_id_fkey(name),
         at:users!sessions_at_id_fkey(name)
       `)
@@ -546,6 +589,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       at: existingSession.at?.name,
       date: existingSession.date,
       hours: existingSession.hours,
+      is_confirmed: existingSession.is_confirmed,
       is_substitution: existingSession.is_substitution
     });
 
@@ -572,6 +616,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         at: existingSession.at?.name,
         date: existingSession.date,
         hours: existingSession.hours,
+        is_confirmed: existingSession.is_confirmed,
         is_substitution: existingSession.is_substitution
       }
     });
