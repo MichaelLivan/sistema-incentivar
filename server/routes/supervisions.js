@@ -53,7 +53,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Create supervision
+// Create supervision - CORRIGIDO: Permitir ATs criarem suas próprias supervisões
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { at_id, start_time, end_time, date, observations } = req.body;
@@ -62,9 +62,18 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'All required fields must be provided' });
     }
 
-    // Only coordinators can create supervisions
-    if (!req.user.type.startsWith('coordenacao-')) {
-      return res.status(403).json({ message: 'Only coordinators can create supervisions' });
+    // ✅ CORREÇÃO: Permitir ATs criarem suas próprias supervisões
+    // ✅ CORREÇÃO: Permitir coordenadores criarem supervisões para qualquer AT
+    // ✅ CORREÇÃO: Permitir admins criarem supervisões
+    if (!req.user.type.startsWith('coordenacao-') && 
+        !req.user.type.startsWith('adm-') && 
+        !req.user.type.startsWith('at-')) {
+      return res.status(403).json({ message: 'Only coordinators, admins, or ATs can create supervisions' });
+    }
+
+    // Se for um AT, só pode criar supervisão para si mesmo
+    if (req.user.type.startsWith('at-') && at_id !== req.user.id) {
+      return res.status(403).json({ message: 'ATs can only create supervisions for themselves' });
     }
 
     // Calculate hours
@@ -79,34 +88,75 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'End time must be after start time' });
     }
 
+    // ✅ CORREÇÃO: Definir coordinator_id baseado no tipo de usuário
+    let coordinatorId;
+    let sector;
+    
+    if (req.user.type.startsWith('at-')) {
+      // AT criando supervisão para si mesmo
+      coordinatorId = req.user.id; // O próprio AT é o "coordenador" neste caso
+      sector = req.user.sector;
+      
+      console.log(`✅ AT ${req.user.name} criando supervisão para si mesmo`);
+    } else if (req.user.type.startsWith('coordenacao-')) {
+      // Coordenador criando supervisão
+      coordinatorId = req.user.id;
+      sector = req.user.sector;
+      
+      console.log(`✅ Coordenador ${req.user.name} criando supervisão para AT ${at_id}`);
+    } else {
+      // Admin criando supervisão
+      coordinatorId = req.user.id;
+      sector = req.user.sector;
+      
+      console.log(`✅ Admin ${req.user.name} criando supervisão`);
+    }
+
     // Insert supervision
     const { data: newSupervision, error } = await supabase
       .from('supervisions')
       .insert({
         at_id,
-        coordinator_id: req.user.id,
+        coordinator_id: coordinatorId,
         start_time,
         end_time,
         date,
         hours,
-        sector: req.user.sector,
+        sector: sector,
         observations: observations || ''
       })
       .select()
       .single();
 
     if (error) {
-      console.error('Error creating supervision:', error);
-      return res.status(500).json({ message: 'Error creating supervision' });
+      console.error('❌ Erro ao criar supervisão:', error);
+      return res.status(500).json({ 
+        message: 'Error creating supervision', 
+        error: error.message,
+        details: error.details || 'No additional details'
+      });
     }
+
+    console.log('✅ Supervisão criada com sucesso:', {
+      id: newSupervision.id,
+      at_id: newSupervision.at_id,
+      coordinator_id: newSupervision.coordinator_id,
+      hours: newSupervision.hours,
+      sector: newSupervision.sector,
+      created_by: req.user.name
+    });
 
     res.status(201).json({
       message: 'Supervision created successfully',
-      supervisionId: newSupervision.id
+      supervisionId: newSupervision.id,
+      supervision: newSupervision
     });
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('❌ Erro interno:', error);
+    res.status(500).json({ 
+      message: 'Internal server error',
+      error: error.message
+    });
   }
 });
 
