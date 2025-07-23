@@ -228,7 +228,7 @@ const handleSupervisionSubmit = async (e) => {
         observations: '',
       });
       
-      alert('✅ Supervisão lançada com sucesso! Foi enviada diretamente para o financeiro ATS.');
+      alert('✅ Supervisão lançada com sucesso!');
       
     } catch (error) {
       console.error('❌ Erro ao criar supervisão:', error);
@@ -606,7 +606,7 @@ const handleSupervisionSubmit = async (e) => {
                 🚀 Registre suas horas de supervisão que serão automaticamente enviadas ao financeiro.
               </p>
               <p className="text-xs text-green-700 mt-1">
-                Não precisa mais de coordenador - você lança diretamente!
+{/*                 Não precisa mais de coordenador - você lança diretamente! */}
               </p>
             </div>
           </CardHeader>
