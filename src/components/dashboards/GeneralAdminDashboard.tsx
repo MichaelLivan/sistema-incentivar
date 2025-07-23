@@ -407,12 +407,6 @@ export const GeneralAdminDashboard: React.FC = () => {
                       <option value="at-grupo">AT - Grupo</option>
                       <option value="at-escolar">AT - Escolar</option>
                     </optgroup>
-                    <optgroup label="Coordenação">
-                      <option value="coordenacao-aba">Coordenação - ABA</option>
-                      <option value="coordenacao-denver">Coordenação - Denver</option>
-                      <option value="coordenacao-grupo">Coordenação - Grupo</option>
-                      <option value="coordenacao-escolar">Coordenação - Escolar</option>
-                    </optgroup>
                     <optgroup label="Administradores">
                       <option value="adm-aba">Admin - ABA</option>
                       <option value="adm-denver">Admin - Denver</option>
@@ -426,6 +420,12 @@ export const GeneralAdminDashboard: React.FC = () => {
                     </optgroup>
                     <optgroup label="Outros">
                       <option value="pais">Pais/Responsáveis</option>
+                    </optgroup>
+                    <optgroup label="⚠️ Descontinuados">
+                      <option value="coordenacao-aba" disabled>Coordenação - ABA (Removido)</option>
+                      <option value="coordenacao-denver" disabled>Coordenação - Denver (Removido)</option>
+                      <option value="coordenacao-grupo" disabled>Coordenação - Grupo (Removido)</option>
+                      <option value="coordenacao-escolar" disabled>Coordenação - Escolar (Removido)</option>
                     </optgroup>
                   </Select>
                 </div>
