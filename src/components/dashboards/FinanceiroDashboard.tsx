@@ -389,75 +389,244 @@ export const FinanceiroDashboard: React.FC = () => {
     }
   };
 
-  const generatePDF = () => {
+  // ✅ CORREÇÃO PRINCIPAL: Função de exportação de planilha MELHORADA E ESTILIZADA
+  const generateStyledExcel = () => {
     const monthName = new Date(selectedYear, selectedMonth - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    const currentDate = new Date().toLocaleDateString('pt-BR');
     
     if (isFinanceiroPct) {
-      const patientData = filteredPatientReport.map(p => ({
-        'Paciente': p.name,
-        'Setor': p.sector.toUpperCase(),
-        'AT': p.at_name,
-        'Horas Confirmadas': formatHours(p.confirmedHours),
-        'Horas Pendentes': formatHours(p.pendingHours),
-        'Total Horas': formatHours(p.totalHours),
-        'Valor/Hora': formatCurrency(p.hourly_rate),
-        'Valor Confirmado': formatCurrency(p.confirmedValue),
-        'Valor Pendente': formatCurrency(p.pendingValue),
-        'Total a Cobrar': formatCurrency(p.totalValue),
-        'Taxa Confirmação': `${p.confirmationRate.toFixed(1)}%`
-      }));
+      // RELATÓRIO PCT - MAIS ELEGANTE
+      const patientData = filteredPatientReport;
       
-      const csvContent = [
-        ['RELATÓRIO DE COBRANÇA AOS PAIS - ' + monthName.toUpperCase()],
-        [''],
-        ['RESUMO:'],
-        ['Total Confirmado:', formatCurrency(totalConfirmedRevenue)],
-        ['Total Pendente:', formatCurrency(totalPendingRevenue)],
-        ['TOTAL GERAL A COBRAR:', formatCurrency(totalRevenue)],
-        ['Total de Horas:', formatHours(totalHours)],
-        [''],
-        ['DETALHAMENTO:'],
-        Object.keys(patientData[0] || {}),
-        ...patientData.map(row => Object.values(row))
-      ].map(row => Array.isArray(row) ? row.join(',') : row).join('\n');
-      
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      // Criar HTML estruturado para Excel
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; }
+    .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #8B5CF6; padding-bottom: 15px; }
+    .company-name { font-size: 24px; font-weight: bold; color: #8B5CF6; margin-bottom: 5px; }
+    .report-title { font-size: 18px; color: #374151; margin-bottom: 5px; }
+    .report-period { font-size: 14px; color: #6B7280; text-transform: uppercase; }
+    .summary-box { background-color: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #10B981; }
+    .summary-title { font-size: 16px; font-weight: bold; color: #065F46; margin-bottom: 15px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+    .summary-item { display: flex; justify-content: space-between; }
+    .summary-label { font-weight: 600; color: #374151; }
+    .summary-value { font-weight: bold; color: #059669; }
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 12px; }
+    .data-table th { background-color: #8B5CF6; color: white; padding: 12px 8px; text-align: center; border: 1px solid #7C3AED; font-weight: bold; }
+    .data-table td { padding: 10px 8px; border: 1px solid #E5E7EB; text-align: center; }
+    .data-table tbody tr:nth-child(even) { background-color: #F9FAFB; }
+    .data-table tbody tr:hover { background-color: #EEF2FF; }
+    .currency { color: #059669; font-weight: 600; }
+    .currency.pending { color: #D97706; }
+    .status-confirmed { background-color: #D1FAE5; color: #065F46; padding: 4px 8px; border-radius: 4px; font-size: 10px; }
+    .status-pending { background-color: #FEF3C7; color: #92400E; padding: 4px 8px; border-radius: 4px; font-size: 10px; }
+    .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #6B7280; border-top: 1px solid #E5E7EB; padding-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">🏥 CLÍNICA INCENTIVAR</div>
+    <div class="report-title">Relatório Financeiro - Cobrança aos Pais</div>
+    <div class="report-period">${monthName.toUpperCase()}</div>
+  </div>
+
+  <div class="summary-box">
+    <div class="summary-title">💰 RESUMO EXECUTIVO</div>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <span class="summary-label">Total Confirmado (Recepção):</span>
+        <span class="summary-value">${formatCurrency(totalConfirmedRevenue)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total Pendente (Recepção):</span>
+        <span class="summary-value" style="color: #D97706;">${formatCurrency(totalPendingRevenue)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">🎯 TOTAL GERAL A COBRAR:</span>
+        <span class="summary-value" style="color: #DC2626; font-size: 18px;">${formatCurrency(totalRevenue)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total de Horas:</span>
+        <span class="summary-value">${formatHours(totalHours)}</span>
+      </div>
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>PACIENTE</th>
+        <th>SETOR</th>
+        <th>AT RESPONSÁVEL</th>
+        <th>H. CONFIRMADAS</th>
+        <th>H. PENDENTES</th>
+        <th>TOTAL HORAS</th>
+        <th>VALOR/HORA</th>
+        <th>VALOR CONFIRMADO</th>
+        <th>VALOR PENDENTE</th>
+        <th>TOTAL A COBRAR</th>
+        <th>TAXA CONFIRM.</th>
+        <th>STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${patientData.map(p => `
+        <tr>
+          <td style="font-weight: 600; text-align: left;">${p.name}</td>
+          <td style="font-weight: 600; color: #7C3AED;">${p.sector.toUpperCase()}</td>
+          <td style="text-align: left;">${p.at_name}</td>
+          <td style="color: #059669; font-weight: 600;">${formatHours(p.confirmedHours)}</td>
+          <td style="color: #D97706; font-weight: 600;">${formatHours(p.pendingHours)}</td>
+          <td style="font-weight: bold; color: #7C3AED;">${formatHours(p.totalHours)}</td>
+          <td class="currency">${formatCurrency(p.hourly_rate)}</td>
+          <td class="currency">${formatCurrency(p.confirmedValue)}</td>
+          <td class="currency pending">${formatCurrency(p.pendingValue)}</td>
+          <td style="font-weight: bold; font-size: 14px; color: #DC2626; background-color: #FEE2E2;">${formatCurrency(p.totalValue)}</td>
+          <td style="font-weight: 600; color: ${p.confirmationRate >= 80 ? '#059669' : p.confirmationRate >= 50 ? '#D97706' : '#DC2626'};">${p.confirmationRate.toFixed(1)}%</td>
+          <td>
+            <span class="${p.pendingHours === 0 ? 'status-confirmed' : 'status-pending'}">
+              ${p.pendingHours === 0 ? '✅ OK' : '⏳ PENDENTE'}
+            </span>
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p><strong>Relatório gerado em:</strong> ${currentDate} | <strong>Sistema:</strong> Clínica Incentivar | <strong>Usuário:</strong> ${user?.name}</p>
+    <p style="margin-top: 5px;"><em>ℹ️ Valores confirmados = Confirmados pela recepção | Valores pendentes = Aguardando confirmação da recepção</em></p>
+  </div>
+</body>
+</html>`;
+
+      // Criar e baixar arquivo
+      const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `relatorio-cobranca-${selectedMonth}-${selectedYear}.csv`;
+      link.download = `Relatorio_Cobranca_Pais_${selectedMonth.toString().padStart(2, '0')}_${selectedYear}.xls`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      
     } else {
-      const atData = filteredATReport.map(at => ({
-        'AT': at.name,
-        'Setor': at.sector.toUpperCase(),
-        'Horas Atendimento': formatHours(at.sessionHours),
-        'Horas Supervisão': formatHours(at.supervisionHours),
-        'Total Horas': formatHours(at.totalHours),
-        'Valor/Hora Atendimento': formatCurrency(at.session_rate),
-        'Valor/Hora Supervisão': formatCurrency(at.supervision_rate),
-        'Pagamento Atendimento': formatCurrency(at.sessionPayment),
-        'Pagamento Supervisão': formatCurrency(at.supervisionPayment),
-        'TOTAL A PAGAR': formatCurrency(at.totalPayment)
-      }));
+      // RELATÓRIO ATS - MAIS ELEGANTE
+      const atData = filteredATReport;
       
-      const csvContent = [
-        ['RELATÓRIO DE PAGAMENTO AOS ATS - ' + monthName.toUpperCase()],
-        [''],
-        ['RESUMO:'],
-        ['Total Pagamentos:', formatCurrency(totalATPayments)],
-        ['Total Horas:', formatHours(totalATHours)],
-        [''],
-        ['DETALHAMENTO:'],
-        Object.keys(atData[0] || {}),
-        ...atData.map(row => Object.values(row))
-      ].map(row => Array.isArray(row) ? row.join(',') : row).join('\n');
-      
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; }
+    .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #8B5CF6; padding-bottom: 15px; }
+    .company-name { font-size: 24px; font-weight: bold; color: #8B5CF6; margin-bottom: 5px; }
+    .report-title { font-size: 18px; color: #374151; margin-bottom: 5px; }
+    .report-period { font-size: 14px; color: #6B7280; text-transform: uppercase; }
+    .summary-box { background-color: #F3F4F6; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 5px solid #059669; }
+    .summary-title { font-size: 16px; font-weight: bold; color: #065F46; margin-bottom: 15px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+    .summary-item { display: flex; justify-content: space-between; }
+    .summary-label { font-weight: 600; color: #374151; }
+    .summary-value { font-weight: bold; color: #059669; }
+    .data-table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 12px; }
+    .data-table th { background-color: #059669; color: white; padding: 12px 8px; text-align: center; border: 1px solid #047857; font-weight: bold; }
+    .data-table td { padding: 10px 8px; border: 1px solid #E5E7EB; text-align: center; }
+    .data-table tbody tr:nth-child(even) { background-color: #F9FAFB; }
+    .data-table tbody tr:hover { background-color: #ECFDF5; }
+    .currency { color: #059669; font-weight: 600; }
+    .hours-session { color: #2563EB; font-weight: 600; }
+    .hours-supervision { color: #7C3AED; font-weight: 600; }
+    .footer { margin-top: 30px; text-align: center; font-size: 11px; color: #6B7280; border-top: 1px solid #E5E7EB; padding-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">🏥 CLÍNICA INCENTIVAR</div>
+    <div class="report-title">Relatório Financeiro - Pagamento aos ATs</div>
+    <div class="report-period">${monthName.toUpperCase()}</div>
+  </div>
+
+  <div class="summary-box">
+    <div class="summary-title">💼 RESUMO EXECUTIVO</div>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <span class="summary-label">Total Atendimentos:</span>
+        <span class="summary-value">${formatCurrency(filteredATReport.reduce((sum, at) => sum + at.sessionPayment, 0))}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total Supervisões:</span>
+        <span class="summary-value">${formatCurrency(filteredATReport.reduce((sum, at) => sum + at.supervisionPayment, 0))}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">🎯 TOTAL GERAL A PAGAR:</span>
+        <span class="summary-value" style="color: #DC2626; font-size: 18px;">${formatCurrency(totalATPayments)}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Total de Horas:</span>
+        <span class="summary-value">${formatHours(totalATHours)}</span>
+      </div>
+    </div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>AT</th>
+        <th>SETOR</th>
+        <th>H. ATENDIMENTO</th>
+        <th>H. SUPERVISÃO</th>
+        <th>TOTAL HORAS</th>
+        <th>VALOR/H ATEND.</th>
+        <th>VALOR/H SUPERV.</th>
+        <th>PAGTO ATENDIMENTO</th>
+        <th>PAGTO SUPERVISÃO</th>
+        <th>TOTAL A PAGAR</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${atData.map(at => `
+        <tr>
+          <td style="font-weight: 600; text-align: left;">${at.name}</td>
+          <td style="font-weight: 600; color: #7C3AED;">${at.sector.toUpperCase()}</td>
+          <td class="hours-session">${formatHours(at.sessionHours)}</td>
+          <td class="hours-supervision">${formatHours(at.supervisionHours)}</td>
+          <td style="font-weight: bold; color: #374151;">${formatHours(at.totalHours)}</td>
+          <td class="currency">${formatCurrency(at.session_rate)}</td>
+          <td class="currency">${formatCurrency(at.supervision_rate)}</td>
+          <td class="currency">${formatCurrency(at.sessionPayment)}</td>
+          <td class="currency">${formatCurrency(at.supervisionPayment)}</td>
+          <td style="font-weight: bold; font-size: 14px; color: #DC2626; background-color: #FEE2E2;">${formatCurrency(at.totalPayment)}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p><strong>Relatório gerado em:</strong> ${currentDate} | <strong>Sistema:</strong> Clínica Incentivar | <strong>Usuário:</strong> ${user?.name}</p>
+    <p style="margin-top: 5px;"><em>ℹ️ Valores calculados apenas para atendimentos confirmados pela recepção</em></p>
+  </div>
+</body>
+</html>`;
+
+      // Criar e baixar arquivo
+      const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = `relatorio-pagamento-ats-${selectedMonth}-${selectedYear}.csv`;
+      link.download = `Relatorio_Pagamento_ATs_${selectedMonth.toString().padStart(2, '0')}_${selectedYear}.xls`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
     }
+    
+    // Notificação de sucesso
+    alert('📊 Relatório exportado com sucesso! Verifique sua pasta de downloads.');
   };
 
   const patientReport = getPatientFinancialReport();
@@ -520,11 +689,11 @@ export const FinanceiroDashboard: React.FC = () => {
             {isFinanceiroPct ? 'Financeiro - Cobrança aos Pais' : 'Financeiro - Pagamento aos ATs'}
           </CardTitle>
           {isFinanceiroPct && (
-//             <div className="bg-blue-50 p-3 rounded-lg mt-3">
-// {/*               <p className="text-sm text-blue-800 font-medium">
-//                 ✅ <strong>Aguarda apenas confirmação da recepção</strong> - Os pais apenas visualizam os atendimentos.
-//               </p> */}
-//             </div>
+            <div className="bg-blue-50 p-3 rounded-lg mt-3">
+              <p className="text-sm text-blue-800 font-medium">
+                ✅ <strong>Aguarda apenas confirmação da recepção</strong> - Os pais apenas visualizam os atendimentos.
+              </p>
+            </div>
           )}
         </CardHeader>
         <CardContent>
@@ -589,12 +758,12 @@ export const FinanceiroDashboard: React.FC = () => {
                   <span>{showCharts ? 'Ocultar' : 'Mostrar'} Gráficos</span>
                 </Button>
                 <Button
-                  onClick={generatePDF}
-                  variant="secondary"
-                  className="flex items-center space-x-2"
+                  onClick={generateStyledExcel}
+                  variant="success"
+                  className="flex items-center space-x-2 bg-green-600 hover:bg-green-700"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Exportar CSV</span>
+                  <span>Exportar Excel</span>
                 </Button>
               </div>
             </div>
