@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } from '../ui/Table';
+import { Footer } from '../ui/Footer';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import { Clock, User, Calendar, Eye } from 'lucide-react';
+import { Clock, User, Calendar, Eye, Info } from 'lucide-react';
 import { formatHours, formatDateBR, calculateHours } from '../../utils/formatters';
 
 export const PaisDashboard: React.FC = () => {
@@ -61,6 +62,7 @@ export const PaisDashboard: React.FC = () => {
     return (
       <div className="container mx-auto px-4 py-6">
         <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-700 mx-auto mb-4"></div>
           <p className="text-lg text-gray-600">Carregando dados...</p>
         </div>
       </div>
@@ -69,6 +71,23 @@ export const PaisDashboard: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
+      {/* Aviso sobre visualização */}
+      <Card>
+        <CardContent className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-start space-x-3">
+            <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <h3 className="font-semibold text-blue-800 mb-1">
+                ℹ️ Painel de Visualização
+              </h3>
+              <p className="text-sm text-blue-700">
+                Você pode visualizar os atendimentos dos seus filhos. A confirmação dos atendimentos é feita pela recepção da clínica automaticamente.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Cards de Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -143,6 +162,14 @@ export const PaisDashboard: React.FC = () => {
               );
             })}
           </div>
+
+          {myChildren.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <User className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+              <p>Nenhum filho encontrado vinculado ao seu email.</p>
+              <p className="text-sm mt-2">Entre em contato com a recepção se precisar de ajuda.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -156,11 +183,11 @@ export const PaisDashboard: React.FC = () => {
             <div className="flex items-center space-x-2">
               <Eye className="w-5 h-5 text-blue-600" />
               <p className="text-sm text-blue-800 font-medium">
-                Visualização dos atendimentos realizados
+                📋 Visualização dos atendimentos realizados
               </p>
             </div>
             <p className="text-xs text-blue-700 mt-1">
-              A confirmação dos atendimentos é feita pela recepção da clínica.
+              A confirmação dos atendimentos é feita automaticamente pela recepção da clínica.
             </p>
           </div>
         </CardHeader>
@@ -189,11 +216,14 @@ export const PaisDashboard: React.FC = () => {
                     <TableCell>
                       {at?.name || 'N/A'}
                       <div className="text-xs text-gray-500">{at?.sector?.toUpperCase() || ''}</div>
+                      {session.is_substitution && (
+                        <div className="text-xs text-orange-600 font-medium">Substituição</div>
+                      )}
                     </TableCell>
                     <TableCell>{formatDateBR(session.date)}</TableCell>
                     <TableCell>{session.start_time}</TableCell>
                     <TableCell>{session.end_time}</TableCell>
-                    <TableCell>{formatHours(calculateHours(session.start_time, session.end_time))}</TableCell>
+                    <TableCell className="font-medium">{formatHours(calculateHours(session.start_time, session.end_time))}</TableCell>
                     <TableCell>
                       <div className="max-w-xs truncate" title={session.observations}>
                         {session.observations || 'Sem observações'}
@@ -218,10 +248,13 @@ export const PaisDashboard: React.FC = () => {
             <div className="text-center py-8 text-gray-500">
               <Eye className="w-16 h-16 mx-auto text-gray-300 mb-4" />
               <p>Nenhum atendimento encontrado para este mês.</p>
+              <p className="text-sm mt-2">Os atendimentos aparecerão aqui assim que forem registrados pelos ATs.</p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      <Footer />
     </div>
   );
 };
