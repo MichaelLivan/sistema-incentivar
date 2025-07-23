@@ -81,7 +81,7 @@ export const PaisDashboard: React.FC = () => {
                 ℹ️ Painel de Visualização
               </h3>
               <p className="text-sm text-blue-700">
-                Você pode visualizar os atendimentos dos seus filhos. A confirmação dos atendimentos é feita pela recepção da clínica automaticamente.
+                Agora você pode visualizar os atendimentos dos seus filhos!
               </p>
             </div>
           </div>
@@ -183,12 +183,12 @@ export const PaisDashboard: React.FC = () => {
             <div className="flex items-center space-x-2">
               <Eye className="w-5 h-5 text-blue-600" />
               <p className="text-sm text-blue-800 font-medium">
-                📋 Visualização dos atendimentos realizados
+{/*                 📋 Visualização dos atendimentos realizados */}
               </p>
-            </div>
+{/*             </div>
             <p className="text-xs text-blue-700 mt-1">
               A confirmação dos atendimentos é feita automaticamente pela recepção da clínica.
-            </p>
+            </p> */}
           </div>
         </CardHeader>
         <CardContent>
