@@ -182,7 +182,7 @@ export const ATDashboard: React.FC = () => {
     setSupervisionForm(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSupervisionSubmit = async (e) => {
+const handleSupervisionSubmit = async (e) => {
     e.preventDefault();
     
     if (!supervisionForm.startTime || !supervisionForm.endTime || !supervisionForm.date) {
@@ -199,12 +199,13 @@ export const ATDashboard: React.FC = () => {
     setSupervisionSubmitting(true);
     
     try {
-      console.log('📤 Enviando supervisão para o banco:', {
+      console.log('📤 Lançando supervisão direto para o financeiro:', {
         at_id: user.id,
         start_time: supervisionForm.startTime,
         end_time: supervisionForm.endTime,
         date: supervisionForm.date,
-        observations: supervisionForm.observations
+        observations: supervisionForm.observations,
+        direct_to_finance: true
       });
 
       await apiService.createSupervision({
@@ -227,7 +228,7 @@ export const ATDashboard: React.FC = () => {
         observations: '',
       });
       
-      alert('✅ Supervisão lançada com sucesso! Vai automaticamente para o financeiro.');
+      alert('✅ Supervisão lançada com sucesso! Foi enviada diretamente para o financeiro ATS.');
       
     } catch (error) {
       console.error('❌ Erro ao criar supervisão:', error);
@@ -236,6 +237,10 @@ export const ATDashboard: React.FC = () => {
       let errorMessage = 'Erro ao lançar supervisão';
       if (error.message) {
         errorMessage += ': ' + error.message;
+      }
+      
+      if (error.message?.includes('403') || error.message?.includes('permission') || error.message?.includes('policy')) {
+        errorMessage = 'Erro de permissão. Contate o administrador para verificar as configurações do banco de dados.';
       }
       
       alert(errorMessage);
