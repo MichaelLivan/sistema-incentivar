@@ -164,14 +164,13 @@ export const LoginForm: React.FC = () => {
 
           
 
-          <div className="mt-6 text-xs text-gray-500 space-y-2">
+<div className="mt-6 text-xs text-gray-500 space-y-2">
             <p className="text-center font-semibold">Para testes, use a senha: <strong>123456</strong></p>
             <div className="border-t pt-3">
               <p className="font-semibold mb-2">Exemplos de emails:</p>
               <div className="space-y-1 text-xs">
                 <p><strong>Administrador Geral:</strong> adm.geral@incentivar.com</p>
                 <p><strong>Administrador Denver:</strong> debora.denver@incentivar.com</p>
-                <p><strong>Coordenação Denver:</strong> talissa@incentivar.com</p>
                 <p><strong>Financeiro Ats:</strong> financeiro.ats@incentivar.com</p>
                 <p><strong>Financeiro Pct:</strong> financeiro.pct@incentivar.com</p>
                 <p><strong>AT Denver:</strong> jessicasantana@incentivar.com</p>
@@ -179,7 +178,13 @@ export const LoginForm: React.FC = () => {
                 <p><strong>Mãe:</strong> elba@incentivar.com</p>
                 <p><strong>Pai:</strong> ronaldo@incentivar.com</p>
                 
-                
+                <div className="bg-blue-50 p-2 rounded mt-3">
+                  <p className="text-blue-800 font-medium text-xs">🔄 Mudanças Recentes:</p>
+                  <p className="text-blue-700 text-xs">• Perfil de coordenação removido</p>
+                  <p className="text-blue-700 text-xs">• ATs lançam próprias supervisões</p>
+                  <p className="text-blue-700 text-xs">• Pais apenas visualizam atendimentos</p>
+                  <p className="text-blue-700 text-xs">• Recepção confirma atendimentos</p>
+                </div>
 
                 <p className="text-gray-400 mt-2">Outros usuários podem ser cadastrados pelo administrador</p>
               </div>
