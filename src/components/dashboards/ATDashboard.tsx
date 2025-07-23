@@ -89,6 +89,7 @@ export const ATDashboard: React.FC = () => {
     patient.sector.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // ✅ CORREÇÃO PRINCIPAL: Função de cálculo de horas PRECISA
   const calculateHours = (start, end) => {
     if (!start || !end) return 0;
     const startParts = start.split(':');
@@ -275,21 +276,34 @@ const handleSupervisionSubmit = async (e) => {
            supervisionDate.getFullYear() === currentYear;
   });
 
-  // ✅ CORREÇÃO PRINCIPAL: Calcular horas com precisão
+  // ✅ CORREÇÃO PRINCIPAL: Calcular horas com precisão MÁXIMA
   const sessionHoursThisMonth = mySessionsThisMonth.reduce((sum, s) => {
-    // Calcular horas pela diferença de tempo, não pelo campo hours
+    // SEMPRE calcular pela diferença de tempo para máxima precisão
     const calculatedHours = calculateHours(s.start_time, s.end_time);
+    console.log(`📊 Sessão ${s.id.substring(0,8)}: ${s.start_time}-${s.end_time} = ${calculatedHours.toFixed(4)}h`);
     return sum + calculatedHours;
   }, 0);
 
   const supervisionHoursThisMonth = mySupervisionsThisMonth.reduce((sum, s) => {
-    // Usar o campo hours salvo ou calcular se não existir
-    const supervisionHours = s.hours || calculateHours(s.start_time, s.end_time);
+    // Usar o campo hours salvo OU calcular se não existir
+    const supervisionHours = s.hours !== null && s.hours !== undefined 
+      ? parseFloat(s.hours) 
+      : calculateHours(s.start_time, s.end_time);
+    
+    console.log(`👨‍🏫 Supervisão ${s.id.substring(0,8)}: ${s.start_time}-${s.end_time} = ${supervisionHours.toFixed(4)}h`);
     return sum + supervisionHours;
   }, 0);
 
-  // ✅ CORREÇÃO: Somar ATENDIMENTOS + SUPERVISÕES
+  // ✅ CORREÇÃO FINAL: Somar ATENDIMENTOS + SUPERVISÕES corretamente
   const totalHoursThisMonth = sessionHoursThisMonth + supervisionHoursThisMonth;
+
+  console.log('🧮 RESUMO DE HORAS FINAL:', {
+    sessionHours: sessionHoursThisMonth.toFixed(4),
+    supervisionHours: supervisionHoursThisMonth.toFixed(4),
+    totalHours: totalHoursThisMonth.toFixed(4),
+    sessionsCount: mySessionsThisMonth.length,
+    supervisionsCount: mySupervisionsThisMonth.length
+  });
 
   const selectedPatient = allSectorPatients.find(p => p.id === sessionForm.patientId);
 
@@ -803,7 +817,9 @@ const handleSupervisionSubmit = async (e) => {
               ) : (
                 mySupervisionsThisMonth.map(supervision => {
                   // ✅ USAR CÁLCULO PRECISO para exibição das supervisões também
-                  const supervisionHours = supervision.hours || calculateHours(supervision.start_time, supervision.end_time);
+                  const supervisionHours = supervision.hours !== null && supervision.hours !== undefined
+                    ? parseFloat(supervision.hours)
+                    : calculateHours(supervision.start_time, supervision.end_time);
                   
                   return (
                     <TableRow key={supervision.id}>
