@@ -71,7 +71,6 @@ export const PaisDashboard: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
-      {/* Aviso sobre visualização */}
       <Card>
         <CardContent className="bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-start space-x-3">
@@ -88,7 +87,6 @@ export const PaisDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Cards de Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="flex items-center space-x-4">
@@ -139,7 +137,6 @@ export const PaisDashboard: React.FC = () => {
         </Card>
       </div>
 
-      {/* Informações dos Filhos */}
       <Card>
         <CardHeader>
           <CardTitle>Meus Filhos</CardTitle>
@@ -173,7 +170,6 @@ export const PaisDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Histórico de Atendimentos - APENAS VISUALIZAÇÃO */}
       <Card>
         <CardHeader>
           <CardTitle>
@@ -183,12 +179,12 @@ export const PaisDashboard: React.FC = () => {
             <div className="flex items-center space-x-2">
               <Eye className="w-5 h-5 text-blue-600" />
               <p className="text-sm text-blue-800 font-medium">
-{/*                 📋 Visualização dos atendimentos realizados */}
+                📋 Visualização dos atendimentos realizados
               </p>
-{/*             </div>
+            </div>
             <p className="text-xs text-blue-700 mt-1">
               A confirmação dos atendimentos é feita automaticamente pela recepção da clínica.
-            </p> */}
+            </p>
           </div>
         </CardHeader>
         <CardContent>

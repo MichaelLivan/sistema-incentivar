@@ -200,3 +200,148 @@ export const formatPreciseHours = (hours: number | string): string => {
     return `${wholeHours}h${minutes}min`;
   }
 };
+
+/**
+ * ✅ FUNÇÃO NOVA: Formata data para padrão brasileiro
+ * @param dateString - Data no formato "YYYY-MM-DD"
+ * @returns String no formato "DD/MM/YYYY"
+ */
+export const formatDateBR = (dateString: string): string => {
+  if (!dateString) return '';
+  
+  try {
+    const date = new Date(dateString + 'T00:00:00');
+    return date.toLocaleDateString('pt-BR');
+  } catch (error) {
+    console.warn('⚠️ formatDateBR: Data inválida', { dateString, error });
+    return dateString;
+  }
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Converte horas decimais para input time
+ * @param hours - Horas em formato decimal (ex: 1.5)
+ * @returns String no formato "HH:MM" para input time
+ */
+export const hoursToTimeInput = (hours: number | string): string => {
+  const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+  
+  if (isNaN(numHours) || numHours === null || numHours === undefined) {
+    return '00:00';
+  }
+  
+  const totalMinutes = Math.round(Math.abs(numHours) * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  
+  return `${wholeHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Converte input time para horas decimais
+ * @param timeString - Horário no formato "HH:MM"
+ * @returns Horas em formato decimal
+ */
+export const parseTimeToHours = (timeString: string): number => {
+  if (!timeString || !timeString.includes(':')) return 0;
+  
+  const [hours, minutes] = timeString.split(':').map(Number);
+  if (isNaN(hours) || isNaN(minutes)) return 0;
+  
+  return hours + (minutes / 60);
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Formatar moeda brasileira
+ * @param value - Valor numérico
+ * @returns String formatada "R$ 1.234,56"
+ */
+export const formatCurrency = (value: number | string): string => {
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  if (isNaN(numValue) || numValue === null || numValue === undefined) {
+    return 'R$ 0,00';
+  }
+  
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(numValue);
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Converter valor para número seguro
+ * @param value - Qualquer valor
+ * @returns Número válido ou 0
+ */
+export const safeNumber = (value: any): number => {
+  if (typeof value === 'number' && !isNaN(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Converter minutos para horas decimais
+ * @param minutes - Minutos totais
+ * @returns Horas em formato decimal
+ */
+export const minutesToHours = (minutes: number): number => {
+  if (isNaN(minutes) || minutes < 0) return 0;
+  return minutes / 60;
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Converter horas decimais para minutos
+ * @param hours - Horas em formato decimal
+ * @returns Minutos totais
+ */
+export const hoursToMinutes = (hours: number | string): number => {
+  const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+  if (isNaN(numHours) || numHours < 0) return 0;
+  return Math.round(numHours * 60);
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Verificar se um horário é válido
+ * @param timeString - Horário no formato "HH:MM"
+ * @returns true se o horário é válido
+ */
+export const isValidTime = (timeString: string): boolean => {
+  if (!timeString || !timeString.includes(':')) return false;
+  
+  const [hours, minutes] = timeString.split(':').map(Number);
+  
+  return !isNaN(hours) && 
+         !isNaN(minutes) && 
+         hours >= 0 && 
+         hours < 24 && 
+         minutes >= 0 && 
+         minutes < 60;
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Arredondar horas para múltiplos de 15 minutos
+ * @param hours - Horas em formato decimal
+ * @returns Horas arredondadas para o múltiplo de 0.25 mais próximo
+ */
+export const roundToQuarterHour = (hours: number | string): number => {
+  const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+  if (isNaN(numHours)) return 0;
+  
+  return Math.round(numHours * 4) / 4;
+};
+
+/**
+ * ✅ FUNÇÃO AUXILIAR: Arredondar horas para múltiplos de 30 minutos
+ * @param hours - Horas em formato decimal
+ * @returns Horas arredondadas para o múltiplo de 0.5 mais próximo
+ */
+export const roundToHalfHour = (hours: number | string): number => {
+  const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
+  if (isNaN(numHours)) return 0;
+  
+  return Math.round(numHours * 2) / 2;
+};
