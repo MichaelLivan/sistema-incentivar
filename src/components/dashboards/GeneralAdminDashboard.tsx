@@ -690,9 +690,11 @@ export const GeneralAdminDashboard: React.FC = () => {
                       value={newUserForm.hourly_rate === 0 ? '' : String(newUserForm.hourly_rate)}
                       onChange={handleInputChange}
                       placeholder="35.00"
-                      step="0.01"
-                      min="0"
                       disabled={submittingForm}
+                      inputProps={{
+                        step: "0.01",
+                        min: "0"
+                      }}
                     />
                   </div>
                 )}
@@ -773,24 +775,26 @@ export const GeneralAdminDashboard: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <div className="flex space-x-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => handleEditUser(user.id)}
-                        title="Editar usuário"
-                        disabled={submittingForm}
-                      >
-                        <Edit2 size={14} />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleDeleteUser(user.id)}
-                        title="Excluir usuário"
-                        disabled={submittingForm}
-                      >
-                        <Trash2 size={14} />
-                      </Button>
+                      <span title="Editar usuário">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleEditUser(user.id)}
+                          disabled={submittingForm}
+                        >
+                          <Edit2 size={14} />
+                        </Button>
+                      </span>
+                      <span title="Excluir usuário">
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleDeleteUser(user.id)}
+                          disabled={submittingForm}
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </span>
                     </div>
                   </TableCell>
                 </TableRow>
