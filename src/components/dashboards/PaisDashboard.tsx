@@ -36,8 +36,10 @@ export const PaisDashboard: React.FC = () => {
   }, [user]);
 
   const myChildren = patients.filter(patient => {
-    const isMainParent = patient.parent_email === user?.email;
-    const isSecondParent = patient.parent_email2 === user?.email;
+    // ✅ CORREÇÃO: Comparação case-insensitive para emails
+    const userEmail = user?.email?.toLowerCase();
+    const isMainParent = patient.parent_email?.toLowerCase() === userEmail;
+    const isSecondParent = patient.parent_email2?.toLowerCase() === userEmail;
     return isMainParent || isSecondParent;
   });
 
@@ -77,10 +79,13 @@ export const PaisDashboard: React.FC = () => {
             <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
             <div>
               <h3 className="font-semibold text-blue-800 mb-1">
-                ℹ️ Painel de Visualização
+                👨‍👩‍👧‍👦 Bem-vindo(a), {user?.name}!
               </h3>
               <p className="text-sm text-blue-700">
-                Agora você pode visualizar os atendimentos dos seus filhos!
+                Aqui você pode acompanhar os atendimentos dos seus filhos em tempo real.
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                📧 Logado como: {user?.email} | 🔐 Senha padrão: 123456 (altere nas configurações)
               </p>
             </div>
           </div>

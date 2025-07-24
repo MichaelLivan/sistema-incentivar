@@ -120,7 +120,9 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Formato de e-mail do segundo responsável inválido' });
     }
 
-    // Verificar se o e-mail 1 já está cadastrado
+    // ✅ NOVA FUNCIONALIDADE: Criar usuário "pais" automaticamente se não existir
+    console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 1:', parent_email);
+    
     const { data: existingParent1 } = await supabase
       .from('users')
       .select('id')
@@ -128,12 +130,49 @@ router.post('/', authenticateToken, async (req, res) => {
       .eq('type', 'pais')
       .maybeSingle();
 
-    if (!existingParent1 && !parent_name?.trim()) {
-      return res.status(400).json({ error: 'Nome do responsável é obrigatório para novo e-mail' });
+    let parentId = existingParent1 ? existingParent1.id : null;
+
+    // Se não existe usuário "pais" com este email, criar automaticamente
+    if (!existingParent1) {
+      if (!parent_name?.trim()) {
+        return res.status(400).json({ error: 'Nome do responsável é obrigatório para novo e-mail' });
+      }
+
+      console.log('➕ [CREATE PATIENT] Criando novo usuário "pais" para:', parent_email);
+      
+      // Gerar hash da senha padrão "123456"
+      const bcrypt = await import('bcryptjs');
+      const defaultPassword = await bcrypt.hash('123456', 12);
+      
+      const { data: newParentUser, error: createParentError } = await supabase
+        .from('users')
+        .insert({
+          name: parent_name.trim(),
+          email: parent_email.toLowerCase().trim(),
+          type: 'pais',
+          password: defaultPassword,
+          active: true,
+          created_at: new Date().toISOString()
+        })
+        .select('id')
+        .single();
+
+      if (createParentError) {
+        console.error('❌ [CREATE PATIENT] Erro ao criar usuário responsável:', createParentError);
+        return res.status(500).json({ 
+          message: 'Erro ao criar usuário para o responsável',
+          error: createParentError.message 
+        });
+      }
+
+      parentId = newParentUser.id;
+      console.log('✅ [CREATE PATIENT] Usuário "pais" criado com sucesso:', newParentUser.id);
     }
 
-    // Verificar se o e-mail 2 já está cadastrado
+    // ✅ MESMA LÓGICA PARA O SEGUNDO RESPONSÁVEL (se fornecido)
     if (parent_email2) {
+      console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 2:', parent_email2);
+      
       const { data: existingParent2 } = await supabase
         .from('users')
         .select('id')
@@ -141,12 +180,42 @@ router.post('/', authenticateToken, async (req, res) => {
         .eq('type', 'pais')
         .maybeSingle();
 
-      if (!existingParent2 && !parent_name2?.trim()) {
-        return res.status(400).json({ error: 'Nome do 2º responsável é obrigatório para novo e-mail' });
+      // Se não existe usuário "pais" com este email, criar automaticamente
+      if (!existingParent2) {
+        if (!parent_name2?.trim()) {
+          return res.status(400).json({ error: 'Nome do 2º responsável é obrigatório para novo e-mail' });
+        }
+
+        console.log('➕ [CREATE PATIENT] Criando novo usuário "pais" para responsável 2:', parent_email2);
+        
+        // Gerar hash da senha padrão "123456"
+        const bcrypt = await import('bcryptjs');
+        const defaultPassword = await bcrypt.hash('123456', 12);
+        
+        const { data: newParentUser2, error: createParent2Error } = await supabase
+          .from('users')
+          .insert({
+            name: parent_name2.trim(),
+            email: parent_email2.toLowerCase().trim(),
+            type: 'pais',
+            password: defaultPassword,
+            active: true,
+            created_at: new Date().toISOString()
+          })
+          .select('id')
+          .single();
+
+        if (createParent2Error) {
+          console.error('❌ [CREATE PATIENT] Erro ao criar usuário responsável 2:', createParent2Error);
+          return res.status(500).json({ 
+            message: 'Erro ao criar usuário para o segundo responsável',
+            error: createParent2Error.message 
+          });
+        }
+
+        console.log('✅ [CREATE PATIENT] Usuário "pais" 2 criado com sucesso:', newParentUser2.id);
       }
     }
-
-    let parentId = existingParent1 ? existingParent1.id : null;
 
     // Verificar se paciente já existe com mesmo nome e responsável principal
     const { data: existingPatient } = await supabase
@@ -203,8 +272,23 @@ router.post('/', authenticateToken, async (req, res) => {
       console.warn('⚠️ Paciente criado, mas não foi possível buscar os dados completos:', fetchError.message);
     }
 
+    // ✅ MENSAGEM DE SUCESSO MELHORADA
+    let successMessage = 'Paciente cadastrado com sucesso';
+    const createdUsers = [];
+    
+    if (!existingParent1) {
+      createdUsers.push(`${parent_name} (${parent_email})`);
+    }
+    
+    if (parent_email2 && !existingParent2) {
+      createdUsers.push(`${parent_name2} (${parent_email2})`);
+    }
+    
+    if (createdUsers.length > 0) {
+      successMessage += `\n\n✅ Usuários "pais" criados automaticamente:\n• ${createdUsers.join('\n• ')}\n\nSenha padrão: 123456\n(Os pais podem alterar a senha após o primeiro login)`;
+    }
     res.status(201).json({
-      message: 'Paciente cadastrado com sucesso',
+      message: successMessage,
       patient: completePatient || newPatient
     });
   } catch (error) {

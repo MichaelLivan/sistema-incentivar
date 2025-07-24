@@ -169,7 +169,7 @@ router.get('/verify', authenticateToken, async (req, res) => {
       const { data: childrenData, error: childrenError } = await supabase
         .from('patients')
         .select('id')
-        .or(`parent_email.eq.${currentUser.email},parent_email2.eq.${currentUser.email}`);
+        .or(`parent_email.ilike.${currentUser.email},parent_email2.ilike.${currentUser.email}`);
       
       if (childrenError) {
         console.error('⚠️ [VERIFY] Erro ao buscar filhos:', childrenError);
