@@ -2,7 +2,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import supabase from '../config/supabase.js';
-import { authenticateToken } from '../middleware/auth.js'; // authorize será usado por rota
+import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -13,22 +13,20 @@ router.get('/', authenticateToken, async (req, res) => {
 
     // Segurança extra: só permite listar ATs se for adm ou financeiro-pct
     if (type === 'at') {
-  const allowed = [
-    'adm-geral', 'adm-aba', 'adm-denver', 'adm-escolar', 'adm-grupo',
-    'financeiro-pct', 'financeiro-ats',
-    'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo',
-    
-  ];
-  if (!allowed.includes(req.user.type)) {
-    return res.status(403).json({ message: 'Access denied for this user type' });
-  }
-}
-
+      const allowed = [
+        'adm-geral', 'adm-aba', 'adm-denver', 'adm-escolar', 'adm-grupo',
+        'financeiro-pct', 'financeiro-ats',
+        'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo',
+      ];
+      if (!allowed.includes(req.user.type)) {
+        return res.status(403).json({ message: 'Access denied for this user type' });
+      }
+    }
 
     let query = supabase
-  .from('users')
-  .select('id, email, name, type, sector, active, created_at, hourly_rate') // ✅ Adicionar hourly_rate
-  .order('name');
+      .from('users')
+      .select('id, email, name, type, sector, active, created_at, hourly_rate')
+      .order('name');
 
     if (sector) {
       query = query.eq('sector', sector);
@@ -43,24 +41,36 @@ router.get('/', authenticateToken, async (req, res) => {
     const { data: users, error } = await query;
 
     if (error) {
-      console.error('Erro ao buscar usuários:', error);
-      return res.status(500).json({ message: 'Erro ao buscar usuários' });
+      console.error('❌ Erro ao buscar usuários:', error);
+      return res.status(500).json({ message: 'Erro ao buscar usuários', error: error.message });
     }
 
-    res.json(users);
+    console.log('✅ Usuários encontrados:', users?.length || 0);
+    res.json(users || []);
   } catch (error) {
-    console.error('Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error('❌ Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno do servidor', error: error.message });
   }
 });
 
-// CREATE USER
+// CREATE USER - VERSÃO CORRIGIDA
 router.post('/', authenticateToken, async (req, res) => {
   try {
+    console.log('📤 Dados recebidos para criar usuário:', req.body);
+    
     const { name, email, type, sector, hourly_rate, password = '123456' } = req.body;
 
+    // Validações básicas
     if (!name || !email || !type) {
-      return res.status(400).json({ message: 'Name, email and type are required' });
+      console.error('❌ Dados obrigatórios ausentes:', { name: !!name, email: !!email, type: !!type });
+      return res.status(400).json({ message: 'Nome, email e tipo são obrigatórios' });
+    }
+
+    // Validar email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.error('❌ Email inválido:', email);
+      return res.status(400).json({ message: 'Email inválido' });
     }
 
     const validTypes = [
@@ -72,55 +82,100 @@ router.post('/', authenticateToken, async (req, res) => {
     ];
 
     if (!validTypes.includes(type)) {
+      console.error('❌ Tipo de usuário inválido:', type);
       return res.status(400).json({ message: 'Tipo de usuário inválido' });
     }
 
-    const needsSector =
-      type.startsWith('at-') ||
-      type.startsWith('coordenacao-') ||
-      (type.startsWith('adm-') && type !== 'adm-geral');
+    // Verificar se setor é necessário
+    const needsSector = type.startsWith('at-') || 
+                       type.startsWith('coordenacao-') || 
+                       (type.startsWith('adm-') && type !== 'adm-geral');
 
     if (needsSector && !sector) {
-      return res.status(400).json({ message: 'Setor é obrigatório para esse tipo' });
+      console.error('❌ Setor obrigatório para tipo:', type);
+      return res.status(400).json({ message: 'Setor é obrigatório para esse tipo de usuário' });
     }
 
-    const { data: existingUser } = await supabase
+    // Verificar se email já existe
+    console.log('🔍 Verificando se email já existe:', email);
+    const { data: existingUser, error: checkError } = await supabase
       .from('users')
-      .select('id')
-      .eq('email', email)
-      .single();
+      .select('id, email')
+      .eq('email', email.toLowerCase())
+      .maybeSingle();
+
+    if (checkError) {
+      console.error('❌ Erro ao verificar email existente:', checkError);
+      return res.status(500).json({ message: 'Erro ao verificar email existente' });
+    }
 
     if (existingUser) {
-      return res.status(400).json({ message: 'Email já cadastrado' });
+      console.error('❌ Email já cadastrado:', email);
+      return res.status(409).json({ message: 'Email já cadastrado no sistema' });
     }
 
+    // Hash da senha
+    console.log('🔐 Gerando hash da senha...');
     const hashedPassword = await bcrypt.hash(password, 12);
 
-   const { data: newUser, error } = await supabase
+    // Preparar dados para inserir
+    const userData = {
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      type,
+      sector: needsSector ? sector : null,
+      password: hashedPassword,
+      hourly_rate: hourly_rate && !isNaN(hourly_rate) ? Number(hourly_rate) : null,
+      active: true,
+      created_at: new Date().toISOString()
+    };
+
+    console.log('💾 Inserindo usuário no banco com dados:', {
+      ...userData,
+      password: '[HIDDEN]'
+    });
+
+    // Inserir no banco
+    const { data: newUser, error: insertError } = await supabase
       .from('users')
-      .insert({
-        name,
-        email,
-        type,
-        sector: needsSector ? sector : null,
-        password: hashedPassword,
-        hourly_rate: hourly_rate || null // ✅ Adicionar hourly_rate
-      })
-      .select()
+      .insert(userData)
+      .select('id, name, email, type, sector, active, created_at, hourly_rate')
       .single();
 
-    if (error) {
-      console.error('Erro ao criar usuário:', error);
-      return res.status(500).json({ message: 'Erro ao criar usuário' });
+    if (insertError) {
+      console.error('❌ Erro detalhado ao inserir usuário:', insertError);
+      
+      // Tratar erros específicos
+      if (insertError.code === '23505') {
+        return res.status(409).json({ message: 'Email já cadastrado' });
+      }
+      
+      return res.status(500).json({ 
+        message: 'Erro ao criar usuário no banco de dados',
+        error: insertError.message,
+        details: insertError.details || insertError.hint
+      });
     }
 
+    if (!newUser) {
+      console.error('❌ Usuário não foi criado - resposta vazia');
+      return res.status(500).json({ message: 'Falha ao criar usuário - resposta vazia' });
+    }
+
+    console.log('✅ Usuário criado com sucesso:', newUser);
+
     res.status(201).json({
+      success: true,
       message: 'Usuário criado com sucesso',
-      userId: newUser.id
+      user: newUser
     });
+
   } catch (error) {
-    console.error('Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error('❌ Erro interno ao criar usuário:', error);
+    res.status(500).json({ 
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    });
   }
 });
 
@@ -130,31 +185,50 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { name, email, type, sector, active, hourly_rate } = req.body;
 
-    const { data: updatedUser, error } = await supabase
+    console.log('📝 Atualizando usuário:', id, req.body);
+
+    // Validar se usuário existe
+    const { data: existingUser, error: checkError } = await supabase
       .from('users')
-      .update({ 
-        name, 
-        email, 
-        type, 
-        sector, 
-        active,
-        hourly_rate: hourly_rate !== undefined ? hourly_rate : undefined // ✅ Adicionar hourly_rate
-      })
+      .select('id')
       .eq('id', id)
-      .select()
       .single();
 
-    if (error) {
-      console.error('Erro ao atualizar usuário:', error);
+    if (checkError || !existingUser) {
+      return res.status(404).json({ message: 'Usuário não encontrado' });
+    }
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (email !== undefined) updateData.email = email.toLowerCase().trim();
+    if (type !== undefined) updateData.type = type;
+    if (sector !== undefined) updateData.sector = sector;
+    if (active !== undefined) updateData.active = active;
+    if (hourly_rate !== undefined) {
+      updateData.hourly_rate = hourly_rate && !isNaN(hourly_rate) ? Number(hourly_rate) : null;
+    }
+
+    const { data: updatedUser, error: updateError } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', id)
+      .select('id, name, email, type, sector, active, created_at, hourly_rate')
+      .single();
+
+    if (updateError) {
+      console.error('❌ Erro ao atualizar usuário:', updateError);
       return res.status(500).json({ message: 'Erro ao atualizar usuário' });
     }
 
+    console.log('✅ Usuário atualizado:', updatedUser);
+
     res.json({
+      success: true,
       message: 'Usuário atualizado com sucesso',
       user: updatedUser
     });
   } catch (error) {
-    console.error('Erro interno:', error);
+    console.error('❌ Erro interno:', error);
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });
@@ -322,33 +396,41 @@ router.get('/email-exists', authenticateToken, async (req, res) => {
     .select('id')
     .eq('email', email.toLowerCase())
     .eq('type', 'pais')
-    .single();
+    .maybeSingle();
 
-  if (error && error.code !== 'PGRST116') {
-    return res.status(500).json({ message: 'Erro ao verificar e-mail', error });
+  if (error) {
+    console.error('❌ Erro ao verificar email:', error);
+    return res.status(500).json({ message: 'Erro ao verificar e-mail', error: error.message });
   }
 
   res.json({ exists: !!data });
 });
 
-// CHECK IF PARENT EMAIL IS AVAILABLE
+// CHECK IF EMAIL IS AVAILABLE
 router.get('/email/:email', async (req, res) => {
   const { email } = req.params;
 
   try {
+    console.log('🔍 Verificando disponibilidade do email:', email);
+    
     const { data, error } = await supabase
       .from('users')
       .select('id')
-      .eq('email', email)
-      .eq('type', 'pais')
+      .eq('email', email.toLowerCase())
       .maybeSingle();
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Erro ao verificar email:', error);
+      return res.status(500).json({ error: 'Erro ao verificar e-mail' });
+    }
 
-    res.json({ isAvailable: !data });
+    const isAvailable = !data;
+    console.log('✅ Email disponível:', isAvailable);
+    
+    res.json({ isAvailable });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro ao verificar e-mail de responsável' });
+    console.error('❌ Erro interno:', err);
+    res.status(500).json({ error: 'Erro interno ao verificar e-mail' });
   }
 });
 
