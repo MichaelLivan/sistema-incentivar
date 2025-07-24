@@ -142,7 +142,7 @@ router.post('/', authenticateToken, async (req, res) => {
       
       // Gerar hash da senha padrão "123456"
       const bcrypt = await import('bcryptjs');
-      const defaultPassword = await bcrypt.hash('123456', 12);
+      const defaultPassword = await bcrypt.default.hash('123456', 12);
       
       const { data: newParentUser, error: createParentError } = await supabase
         .from('users')
@@ -190,7 +190,7 @@ router.post('/', authenticateToken, async (req, res) => {
         
         // Gerar hash da senha padrão "123456"
         const bcrypt = await import('bcryptjs');
-        const defaultPassword = await bcrypt.hash('123456', 12);
+        const defaultPassword = await bcrypt.default.hash('123456', 12);
         
         const { data: newParentUser2, error: createParent2Error } = await supabase
           .from('users')
