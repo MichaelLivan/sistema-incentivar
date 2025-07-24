@@ -1,4 +1,4 @@
-// ✅ CONFIGURAÇÃO CORRIGIDA DA URL DA API
+// ✅ CONFIGURAÇÃO CORRIGIDA E MELHORADA DA URL DA API
 const API_BASE_URL = (() => {
   // Em produção (Railway), usar a URL do próprio serviço
   if (import.meta.env.PROD) {
@@ -11,6 +11,7 @@ const API_BASE_URL = (() => {
 
 console.log('🌐 [API] URL configurada:', API_BASE_URL);
 console.log('🔍 [API] Modo:', import.meta.env.PROD ? 'PRODUÇÃO' : 'DESENVOLVIMENTO');
+console.log('🔍 [API] VITE_API_URL:', import.meta.env.VITE_API_URL || 'Não definida');
 
 class ApiService {
   private getAuthHeaders(): Record<string, string> {
@@ -21,6 +22,9 @@ class ApiService {
     
     if (token) {
       headers.Authorization = `Bearer ${token}`;
+      console.log('🔑 [API] Token incluído no header');
+    } else {
+      console.log('⚠️ [API] Nenhum token encontrado');
     }
     
     return headers;
@@ -30,11 +34,15 @@ class ApiService {
     const contentType = response.headers.get('content-type');
     let responseData;
 
+    console.log(`📊 [API] Resposta recebida - Status: ${response.status}, Content-Type: ${contentType}`);
+
     try {
       if (contentType && contentType.includes('application/json')) {
         responseData = await response.json();
+        console.log('📄 [API] Dados da resposta:', responseData);
       } else {
         const text = await response.text();
+        console.log('📄 [API] Resposta em texto:', text);
         responseData = { message: text || `Erro ${response.status}: ${response.statusText}` };
       }
     } catch (parseError) {
@@ -54,15 +62,15 @@ class ApiService {
       let errorMessage = responseData.message || responseData.error || 'Erro na requisição';
       
       if (response.status === 401) {
-        errorMessage = 'Credencial Inválida';
+        errorMessage = 'Credencial Inválida - Verifique email e senha';
       } else if (response.status === 403) {
-        errorMessage = 'Acesso negado';
+        errorMessage = 'Acesso negado - Permissão insuficiente';
       } else if (response.status === 404) {
-        errorMessage = 'Recurso não encontrado';
+        errorMessage = 'Recurso não encontrado - Verifique se o backend está rodando';
       } else if (response.status === 409) {
         errorMessage = responseData.message || 'Conflito de dados';
       } else if (response.status >= 500) {
-        errorMessage = 'Erro interno do servidor';
+        errorMessage = 'Erro interno do servidor - Contate o suporte';
       }
       
       throw new Error(errorMessage);
@@ -77,30 +85,119 @@ class ApiService {
       const searchParams = new URLSearchParams(params);
       url += `?${searchParams.toString()}`;
     }
+    console.log('🌐 [API] URL construída:', url);
     return url;
+  }
+
+  // ✅ FUNÇÃO NOVA: Testar conectividade com o backend
+  async testConnection(): Promise<{ success: boolean; url: string; error?: string }> {
+    const urlsToTest = [
+      `${API_BASE_URL}/health`,
+      `${API_BASE_URL}/auth/health`,
+      'http://localhost:3001/api/health',
+      'http://localhost:3001/api/auth/health'
+    ];
+
+    for (const url of urlsToTest) {
+      try {
+        console.log(`🔍 [API] Testando URL: ${url}`);
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+        
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeout);
+        
+        if (response.ok || response.status === 404) {
+          console.log(`✅ [API] Servidor encontrado em: ${url}`);
+          return { success: true, url };
+        }
+        
+      } catch (error) {
+        console.log(`❌ [API] Falha em ${url}:`, error);
+        continue;
+      }
+    }
+    
+    return { 
+      success: false, 
+      url: API_BASE_URL,
+      error: 'Não foi possível conectar ao servidor. Verifique se o backend está rodando na porta 3001.'
+    };
   }
 
   // ===== AUTENTICAÇÃO =====
   async login(email: string, password: string): Promise<{ user: any; token: string }> {
-    console.log('🔄 [API] Fazendo login para:', email);
+    console.log('🔄 [API] Iniciando login para:', email);
+    
+    // ✅ Primeiro testar conectividade
+    const connectionTest = await this.testConnection();
+    if (!connectionTest.success) {
+      console.error('❌ [API] Servidor não acessível:', connectionTest.error);
+      throw new Error(connectionTest.error || 'Servidor não está acessível');
+    }
     
     const url = `${API_BASE_URL}/auth/login`;
-    console.log('🌐 [API] URL login:', url);
+    console.log('🌐 [API] URL de login:', url);
     
     try {
+      console.log('📤 [API] Enviando requisição de login...');
+      
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ email: email.trim(), password })
       });
       
       console.log('📊 [API] Status da resposta login:', response.status);
+      console.log('📊 [API] Headers da resposta:', Object.fromEntries(response.headers.entries()));
+      
       const data = await this.handleResponse(response);
-      console.log('✅ [API] Login bem-sucedido:', data);
+      
+      // ✅ Validação aprimorada da resposta
+      if (!data) {
+        throw new Error('Resposta vazia do servidor');
+      }
+      
+      if (!data.user) {
+        throw new Error('Dados do usuário não recebidos');
+      }
+      
+      if (!data.token) {
+        throw new Error('Token de autenticação não recebido');
+      }
+      
+      console.log('✅ [API] Login bem-sucedido:', {
+        user: data.user.name,
+        email: data.user.email,
+        type: data.user.type,
+        tokenReceived: !!data.token
+      });
       
       return data;
+      
     } catch (error) {
       console.error('❌ [API] Erro no login:', error);
+      
+      // ✅ Tratamento melhorado de erros de rede
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('Não foi possível conectar ao servidor. Verifique se o backend está rodando na porta 3001.');
+        } else if (error.message.includes('ERR_CONNECTION_REFUSED')) {
+          throw new Error('Conexão recusada. O servidor backend não está respondendo na porta 3001.');
+        } else if (error.message.includes('timeout') || error.name === 'AbortError') {
+          throw new Error('Timeout na conexão. Verifique sua internet ou se o servidor está lento.');
+        }
+      }
+      
       throw error;
     }
   }
@@ -109,18 +206,25 @@ class ApiService {
     try {
       console.log('🔄 [API] Verificando token...');
       
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        console.log('⚠️ [API] Nenhum token para verificar');
+        return { valid: false };
+      }
+      
       const response = await fetch(`${API_BASE_URL}/auth/verify`, {
         headers: this.getAuthHeaders()
       });
       
       if (!response.ok) {
-        console.log('⚠️ [API] Token inválido:', response.status);
+        console.log(`⚠️ [API] Token inválido: ${response.status}`);
         return { valid: false };
       }
       
-      const user = await this.handleResponse(response);
-      console.log('✅ [API] Token válido para:', user.email);
-      return { valid: true, user };
+      const userData = await this.handleResponse(response);
+      console.log('✅ [API] Token válido para:', userData.user?.email);
+      return { valid: true, user: userData.user || userData };
+      
     } catch (error) {
       console.log('⚠️ [API] Erro na verificação do token:', error);
       return { valid: false };
@@ -129,10 +233,14 @@ class ApiService {
 
   async logout(): Promise<void> {
     try {
+      console.log('🔄 [API] Fazendo logout...');
+      
       await fetch(`${API_BASE_URL}/auth/logout`, {
         method: 'POST',
         headers: this.getAuthHeaders()
       });
+      
+      console.log('✅ [API] Logout realizado');
     } catch (error) {
       console.warn('⚠️ [API] Erro no logout (ignorando):', error);
       // Ignorar erros de logout
@@ -140,6 +248,8 @@ class ApiService {
   }
 
   async changePassword(passwordData: { currentPassword: string; newPassword: string }): Promise<any> {
+    console.log('🔐 [API] Alterando senha...');
+    
     const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
@@ -181,7 +291,7 @@ class ApiService {
     hourly_rate?: number;
     password?: string;
   }): Promise<any> {
-    console.log('📤 [API] Criando usuário:', userData);
+    console.log('📤 [API] Criando usuário:', { ...userData, password: '***' });
     
     try {
       const response = await fetch(`${API_BASE_URL}/users`, {

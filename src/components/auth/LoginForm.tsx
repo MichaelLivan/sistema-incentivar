@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Eye, EyeOff, RefreshCw, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { Eye, EyeOff, RefreshCw, AlertCircle, Wifi, WifiOff, CheckCircle } from 'lucide-react';
 
 export const LoginForm: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -13,8 +13,9 @@ export const LoginForm: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [connectionTested, setConnectionTested] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'success' | 'error'>('unknown');
+  const [apiUrl, setApiUrl] = useState<string>('');
   
-  const { login, isLoading, error } = useAuth(); // ✅ CORRIGIDO: Usar isLoading
+  const { login, isLoading, error } = useAuth();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -46,7 +47,7 @@ export const LoginForm: React.FC = () => {
     }
   };
 
-  // ✅ FUNÇÃO MELHORADA: Testar conectividade com o backend
+  // ✅ FUNÇÃO MELHORADA: Testar conectividade com melhor diagnóstico
   const testConnection = async () => {
     setConnectionTested(true);
     setConnectionStatus('unknown');
@@ -54,21 +55,23 @@ export const LoginForm: React.FC = () => {
     try {
       console.log('🔍 [LOGIN FORM] Testando conectividade...');
       
-      // Tentar duas URLs possíveis
-      const urls = [
+      // URLs para testar em ordem de prioridade
+      const urlsToTest = [
+        'http://localhost:3001/api/health',
         'http://localhost:3001/api/auth/health',
+        '/api/health',
         '/api/auth/health'
       ];
       
       let lastError = null;
-      let connected = false;
+      let successUrl = null;
       
-      for (const url of urls) {
+      for (const url of urlsToTest) {
         try {
           console.log(`🌐 [LOGIN FORM] Testando URL: ${url}`);
           
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+          const timeout = setTimeout(() => controller.abort(), 5000);
           
           const response = await fetch(url, {
             method: 'GET',
@@ -78,22 +81,30 @@ export const LoginForm: React.FC = () => {
           
           clearTimeout(timeout);
           
-          console.log(`📊 [LOGIN FORM] Status da resposta (${url}):`, response.status);
+          console.log(`📊 [LOGIN FORM] Resposta (${url}):`, response.status);
           
-          if (response.ok || response.status === 404) {
-            // 404 é OK porque significa que o servidor está rodando
-            setConnectionStatus('success');
-            connected = true;
-            
-            const message = response.status === 404 
-              ? `✅ Servidor backend está rodando!\n\nURL: ${url}\nStatus: ${response.status} (endpoint não encontrado, mas servidor está ativo)`
-              : `✅ Servidor backend conectado com sucesso!\n\nURL: ${url}\nStatus: ${response.status}`;
-            
-            alert(message);
+          if (response.ok) {
+            // Tentar ler a resposta
+            try {
+              const data = await response.json();
+              console.log(`✅ [LOGIN FORM] Resposta válida de ${url}:`, data);
+              successUrl = url;
+              setApiUrl(url);
+              break;
+            } catch (parseError) {
+              console.log(`⚠️ [LOGIN FORM] Resposta não-JSON de ${url}, mas servidor respondeu`);
+              successUrl = url;
+              setApiUrl(url);
+              break;
+            }
+          } else if (response.status === 404) {
+            // 404 significa que o servidor está rodando, mas endpoint não existe
+            console.log(`ℹ️ [LOGIN FORM] Servidor ativo em ${url} (404 = endpoint não encontrado)`);
+            successUrl = url;
+            setApiUrl(url);
             break;
-          } else {
-            lastError = `Status ${response.status}: ${response.statusText}`;
           }
+          
         } catch (fetchError) {
           console.log(`❌ [LOGIN FORM] Erro na URL ${url}:`, fetchError);
           lastError = fetchError;
@@ -101,7 +112,13 @@ export const LoginForm: React.FC = () => {
         }
       }
       
-      if (!connected) {
+      if (successUrl) {
+        setConnectionStatus('success');
+        alert(`✅ Servidor backend encontrado!\n\n` +
+              `URL: ${successUrl}\n` +
+              `Status: Conectado\n\n` +
+              `Agora você pode tentar fazer login.`);
+      } else {
         setConnectionStatus('error');
         
         let errorMessage = '❌ Não foi possível conectar ao servidor backend.\n\n';
@@ -109,18 +126,22 @@ export const LoginForm: React.FC = () => {
         if (lastError instanceof Error) {
           if (lastError.name === 'AbortError') {
             errorMessage += 'Motivo: Timeout na conexão (>5s)\n\n';
-          } else if (lastError.message.includes('Failed to fetch') || lastError.message.includes('ERR_CONNECTION_REFUSED')) {
-            errorMessage += 'Motivo: Conexão recusada\n\n';
+          } else if (lastError.message.includes('Failed to fetch') || 
+                     lastError.message.includes('ERR_CONNECTION_REFUSED') ||
+                     lastError.message.includes('ECONNREFUSED')) {
+            errorMessage += 'Motivo: Conexão recusada - Servidor não está rodando\n\n';
           } else {
             errorMessage += `Motivo: ${lastError.message}\n\n`;
           }
         }
         
-        errorMessage += 'Verificações necessárias:\n';
-        errorMessage += '1. ✅ O servidor backend está rodando na porta 3001?\n';
-        errorMessage += '2. ✅ Execute: npm run dev:backend\n';
-        errorMessage += '3. ✅ Verifique o console do backend para erros\n';
-        errorMessage += '4. ✅ Teste: http://localhost:3001/api/health';
+        errorMessage += '🔧 SOLUÇÕES:\n';
+        errorMessage += '1. ✅ Verifique se o backend está rodando:\n';
+        errorMessage += '   npm run dev:backend\n\n';
+        errorMessage += '2. ✅ Verifique se está na porta 3001:\n';
+        errorMessage += '   http://localhost:3001/api/health\n\n';
+        errorMessage += '3. ✅ Verifique se não há outras aplicações usando a porta 3001\n\n';
+        errorMessage += '4. ✅ Reinicie o backend se necessário';
         
         alert(errorMessage);
       }
@@ -128,36 +149,90 @@ export const LoginForm: React.FC = () => {
     } catch (criticalError) {
       console.error('❌ [LOGIN FORM] Erro crítico no teste de conexão:', criticalError);
       setConnectionStatus('error');
-      alert('❌ Erro crítico ao testar conexão. Verifique o console do navegador.');
+      alert('❌ Erro crítico ao testar conexão. Verifique o console do navegador para mais detalhes.');
     }
   };
 
-  // ✅ FUNÇÃO NOVA: Informações de debug
-  const showDebugInfo = () => {
-    const debugInfo = {
-      frontend: {
-        url: window.location.href,
-        mode: import.meta.env.PROD ? 'PRODUÇÃO' : 'DESENVOLVIMENTO'
-      },
-      backend: {
-        expectedUrl: 'http://localhost:3001/api',
-        healthCheck: 'http://localhost:3001/api/health'
-      },
-      token: localStorage.getItem('authToken') ? 'Presente' : 'Ausente',
-      lastError: error || 'Nenhum'
+  // ✅ FUNÇÃO NOVA: Verificar configuração da API
+  const checkApiConfig = () => {
+    const isDev = !import.meta.env.PROD;
+    const envApiUrl = import.meta.env.VITE_API_URL;
+    
+    const currentApiUrl = isDev ? 'http://localhost:3001/api' : (envApiUrl || '/api');
+    
+    const configInfo = {
+      environment: isDev ? 'DESENVOLVIMENTO' : 'PRODUÇÃO',
+      currentUrl: currentApiUrl,
+      envVariable: envApiUrl || 'Não definida',
+      frontendUrl: window.location.href,
+      userAgent: navigator.userAgent
     };
     
-    console.log('🔍 [LOGIN FORM] Debug Info:', debugInfo);
+    console.log('🔍 [LOGIN FORM] Configuração da API:', configInfo);
     
-    const message = `📋 INFORMAÇÕES DE DEBUG:\n\n` +
-      `Frontend: ${debugInfo.frontend.url}\n` +
-      `Modo: ${debugInfo.frontend.mode}\n\n` +
-      `Backend esperado: ${debugInfo.backend.expectedUrl}\n` +
-      `Health check: ${debugInfo.backend.healthCheck}\n\n` +
-      `Token: ${debugInfo.token}\n` +
-      `Último erro: ${debugInfo.lastError}`;
+    const message = `📋 CONFIGURAÇÃO ATUAL DA API:\n\n` +
+      `Ambiente: ${configInfo.environment}\n` +
+      `URL da API: ${configInfo.currentUrl}\n` +
+      `VITE_API_URL: ${configInfo.envVariable}\n` +
+      `Frontend: ${configInfo.frontendUrl}\n\n` +
+      `🔧 PARA DESENVOLVIMENTO:\n` +
+      `• O backend deve estar rodando em http://localhost:3001\n` +
+      `• Execute: npm run dev:backend\n` +
+      `• Teste: http://localhost:3001/api/health\n\n` +
+      `🚀 PARA PRODUÇÃO:\n` +
+      `• Configure VITE_API_URL no .env\n` +
+      `• Exemplo: VITE_API_URL=https://seu-backend.com/api`;
     
     alert(message);
+  };
+
+  // ✅ FUNÇÃO NOVA: Teste rápido de login
+  const quickLoginTest = async () => {
+    if (!formData.email || !formData.password) {
+      alert('⚠️ Preencha email e senha antes de testar');
+      return;
+    }
+
+    try {
+      console.log('🧪 [LOGIN FORM] Teste rápido de login...');
+      
+      // Fazer uma requisição direta para debug
+      const response = await fetch('http://localhost:3001/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password
+        })
+      });
+      
+      console.log('📊 [LOGIN FORM] Resposta do teste:', response.status);
+      
+      const responseText = await response.text();
+      console.log('📄 [LOGIN FORM] Conteúdo da resposta:', responseText);
+      
+      if (response.ok) {
+        try {
+          const data = JSON.parse(responseText);
+          alert('✅ Teste de login bem-sucedido!\n\n' +
+                `Usuário: ${data.user?.name || 'N/A'}\n` +
+                `Tipo: ${data.user?.type || 'N/A'}\n` +
+                `Token: ${data.token ? 'Recebido' : 'Ausente'}`);
+        } catch (parseError) {
+          alert('✅ Servidor respondeu, mas resposta não é JSON válido');
+        }
+      } else {
+        alert(`❌ Teste de login falhou\n\n` +
+              `Status: ${response.status}\n` +
+              `Resposta: ${responseText}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ [LOGIN FORM] Erro no teste rápido:', error);
+      alert(`❌ Erro no teste de login:\n\n${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+    }
   };
 
   return (
@@ -218,7 +293,7 @@ export const LoginForm: React.FC = () => {
               </div>
             </div>
 
-            {/* ✅ SEÇÃO MELHORADA: Exibição de erros */}
+            {/* ✅ SEÇÃO MELHORADA: Exibição de erros com diagnóstico */}
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                 <div className="flex items-start space-x-3">
@@ -227,9 +302,12 @@ export const LoginForm: React.FC = () => {
                     <p className="font-semibold text-red-800 text-sm">Erro no Login:</p>
                     <p className="text-red-700 text-sm mt-1">{error}</p>
                     
-                    {/* Botões de ajuda baseados no tipo de erro */}
+                    {/* ✅ Botões de diagnóstico baseados no tipo de erro */}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {error.includes('conectar') || error.includes('servidor') ? (
+                      {(error.includes('conectar') || 
+                        error.includes('servidor') || 
+                        error.includes('Failed to fetch') ||
+                        error.includes('Connection refused')) ? (
                         <>
                           <Button 
                             type="button" 
@@ -246,30 +324,70 @@ export const LoginForm: React.FC = () => {
                             type="button" 
                             size="sm" 
                             variant="secondary" 
-                            onClick={showDebugInfo}
+                            onClick={checkApiConfig}
                             disabled={isLoading}
                             className="text-xs"
                           >
-                            🔍 Debug
+                            🔍 Config API
                           </Button>
                         </>
-                      ) : error.includes('credencial') || error.includes('senha') ? (
-                        <p className="text-xs text-red-600 mt-1">
-                          💡 Verifique seu email e senha. Use as credenciais de exemplo abaixo para teste.
-                        </p>
-                      ) : null}
+                      ) : (error.includes('credencial') || 
+                           error.includes('senha') || 
+                           error.includes('401') ||
+                           error.includes('403')) ? (
+                        <>
+                          <p className="text-xs text-red-600 mt-1">
+                            💡 Verifique seu email e senha. Use as credenciais de exemplo abaixo para teste.
+                          </p>
+                          <Button 
+                            type="button" 
+                            size="sm" 
+                            variant="secondary" 
+                            onClick={quickLoginTest}
+                            disabled={isLoading}
+                            className="text-xs"
+                          >
+                            🧪 Teste Direto
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button 
+                            type="button" 
+                            size="sm" 
+                            variant="secondary" 
+                            onClick={testConnection}
+                            disabled={isLoading}
+                            className="text-xs"
+                          >
+                            <Wifi className="w-3 h-3 mr-1" />
+                            Diagnóstico
+                          </Button>
+                          <Button 
+                            type="button" 
+                            size="sm" 
+                            variant="secondary" 
+                            onClick={quickLoginTest}
+                            disabled={isLoading}
+                            className="text-xs"
+                          >
+                            🧪 Teste Login
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
                 
-                {/* Status da conexão */}
+                {/* ✅ Status da conexão melhorado */}
                 {connectionTested && (
                   <div className="mt-3 pt-3 border-t border-red-200">
                     <div className="flex items-center space-x-2">
                       {connectionStatus === 'success' ? (
                         <>
-                          <Wifi className="w-4 h-4 text-green-600" />
+                          <CheckCircle className="w-4 h-4 text-green-600" />
                           <span className="text-green-700 text-xs font-medium">Servidor conectado</span>
+                          {apiUrl && <span className="text-green-600 text-xs">({apiUrl})</span>}
                         </>
                       ) : connectionStatus === 'error' ? (
                         <>
@@ -304,13 +422,39 @@ export const LoginForm: React.FC = () => {
             </Button>
           </form>
 
-          {/* ✅ SEÇÃO ATUALIZADA: Credenciais de exemplo */}
+          {/* ✅ SEÇÃO ATUALIZADA: Credenciais de exemplo e diagnóstico */}
           <div className="mt-6 text-xs text-gray-500 space-y-2">
             <p className="text-center font-semibold">Para testes, use a senha: <strong>123456</strong></p>
+            
+            {/* ✅ Botão de diagnóstico sempre visível */}
+            <div className="flex justify-center space-x-2 mb-3">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={testConnection}
+                disabled={isLoading}
+                className="text-xs px-2 py-1"
+              >
+                <Wifi className="w-3 h-3 mr-1" />
+                Testar Backend
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={checkApiConfig}
+                disabled={isLoading}
+                className="text-xs px-2 py-1"
+              >
+                🔍 Ver Config
+              </Button>
+            </div>
+            
             <div className="border-t pt-3">
               <p className="font-semibold mb-2">📧 Exemplos de emails:</p>
               <div className="space-y-1 text-xs">
-                <p><strong>👑 Administrador Geral:</strong> adm.geral@incentivar.com</p>
+                <p><strong>👑 Admin Geral:</strong> adm.geral@incentivar.com</p>
                 <p><strong>🏢 Admin Denver:</strong> debora.denver@incentivar.com</p>
                 <p><strong>💰 Financeiro ATs:</strong> financeiro.ats@incentivar.com</p>
                 <p><strong>💼 Financeiro PCT:</strong> financeiro.pct@incentivar.com</p>
@@ -321,10 +465,9 @@ export const LoginForm: React.FC = () => {
                 
                 <div className="bg-blue-50 p-2 rounded mt-3">
                   <p className="text-blue-800 font-medium text-xs">🔄 Atualizações Recentes:</p>
-                  <p className="text-blue-700 text-xs">• Perfil de coordenação removido</p>
-                  <p className="text-blue-700 text-xs">• ATs lançam próprias supervisões</p>
-                  <p className="text-blue-700 text-xs">• Pais apenas visualizam atendimentos</p>
-                  <p className="text-blue-700 text-xs">• Recepção confirma atendimentos</p>
+                  <p className="text-blue-700 text-xs">• Sistema totalmente integrado com banco</p>
+                  <p className="text-blue-700 text-xs">• Login via backend Node.js + Supabase</p>
+                  <p className="text-blue-700 text-xs">• Melhor diagnóstico de erros</p>
                 </div>
 
                 <div className="bg-green-50 p-2 rounded mt-2">
@@ -332,6 +475,7 @@ export const LoginForm: React.FC = () => {
                   <p className="text-green-700 text-xs">• Backend deve rodar na porta 3001</p>
                   <p className="text-green-700 text-xs">• Execute: npm run dev:backend</p>
                   <p className="text-green-700 text-xs">• Teste: http://localhost:3001/api/health</p>
+                  <p className="text-green-700 text-xs">• Use os botões de diagnóstico acima</p>
                 </div>
 
                 <p className="text-gray-400 mt-2">Outros usuários podem ser cadastrados pelo administrador</p>
