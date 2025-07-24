@@ -34,7 +34,7 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // ✅ CORRIGIDO: Usar isLoading consistentemente
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,27 +44,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       try {
         const token = localStorage.getItem('authToken');
-        console.log('🔍 Verificando token:', token ? 'Presente' : 'Ausente');
+        console.log('🔍 [AUTH] Verificando token:', token ? 'Presente' : 'Ausente');
         
         if (token) {
-          const { valid, user } = await apiService.verifyToken();
-          console.log('📊 Resultado verificação:', { valid, user });
+          console.log('🔄 [AUTH] Validando token com servidor...');
+          const result = await apiService.verifyToken();
+          console.log('📊 [AUTH] Resultado verificação:', result);
           
-          if (valid && user) {
-            setUser(user);
-            console.log('✅ Usuário autenticado:', user.email);
+          if (result.valid && result.user) {
+            setUser(result.user);
+            console.log('✅ [AUTH] Usuário autenticado:', result.user.email, result.user.type);
           } else {
-            console.log('⚠️ Token inválido, removendo...');
+            console.log('⚠️ [AUTH] Token inválido, removendo...');
             localStorage.removeItem('authToken');
             setUser(null);
           }
         } else {
-          console.log('⚠️ Nenhum token encontrado');
+          console.log('⚠️ [AUTH] Nenhum token encontrado');
           setUser(null);
         }
       } catch (error) {
-        console.error('❌ Erro ao verificar token:', error);
-        setError('Falha ao verificar autenticação');
+        console.error('❌ [AUTH] Erro ao verificar token:', error);
+        
+        // ✅ CORREÇÃO: Tratamento melhor de erros de rede
+        if (error instanceof Error) {
+          if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
+            setError('Não foi possível conectar ao servidor. Verifique se o backend está rodando.');
+          } else if (error.message.includes('401') || error.message.includes('403')) {
+            console.log('🧹 [AUTH] Token expirado, limpando...');
+            localStorage.removeItem('authToken');
+            setUser(null);
+          } else {
+            setError('Erro ao verificar autenticação');
+          }
+        }
+        
         localStorage.removeItem('authToken');
         setUser(null);
       } finally {
@@ -79,50 +93,48 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setIsLoading(true);
     setError(null);
     
-    console.log('🔄 Tentando login:', { email, password: '***' });
+    console.log('🔄 [AUTH] Tentando login:', { email, password: '***' });
     
     try {
       const response = await apiService.login(email, password);
-      console.log('📊 Resposta do login:', response);
+      console.log('📊 [AUTH] Resposta do login:', response);
       
-      // CORREÇÃO: Verificar se a resposta tem o formato correto
+      // ✅ CORREÇÃO: Verificação mais robusta da resposta
       if (response && response.user && response.token) {
-        console.log('✅ Login bem-sucedido');
+        console.log('✅ [AUTH] Login bem-sucedido');
         setUser(response.user);
         localStorage.setItem('authToken', response.token);
+        setError(null); // ✅ Limpar erro em caso de sucesso
         return true;
-      } else if (response && response.user) {
-        // CORREÇÃO: Caso o token venha em outro campo
-        const token = response.token || response.accessToken || response.authToken;
-        if (token) {
-          console.log('✅ Login bem-sucedido (token alternativo)');
-          setUser(response.user);
-          localStorage.setItem('authToken', token);
-          return true;
-        }
+      } else {
+        console.log('❌ [AUTH] Resposta de login inválida:', response);
+        setError('Formato de resposta inválido do servidor');
+        return false;
       }
       
-      console.log('❌ Resposta de login inválida:', response);
-      setError('Formato de resposta inválido do servidor');
-      return false;
-      
     } catch (error) {
-      console.error('❌ Erro no login:', error);
+      console.error('❌ [AUTH] Erro no login:', error);
       
-      // CORREÇÃO: Mensagens de erro mais específicas
+      // ✅ CORREÇÃO: Mensagens de erro mais específicas e úteis
       let errorMessage = 'Erro ao fazer login';
       
       if (error instanceof Error) {
-        if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-          errorMessage = 'Email ou senha inválidos';
-        } else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+        const message = error.message.toLowerCase();
+        
+        if (message.includes('credencial inválida') || message.includes('invalid credentials')) {
+          errorMessage = 'Email ou senha incorretos';
+        } else if (message.includes('401') || message.includes('unauthorized')) {
+          errorMessage = 'Email ou senha incorretos';
+        } else if (message.includes('403') || message.includes('forbidden')) {
           errorMessage = 'Acesso negado. Verifique suas credenciais';
-        } else if (error.message.includes('500')) {
+        } else if (message.includes('500') || message.includes('internal server error')) {
           errorMessage = 'Erro no servidor. Tente novamente em alguns minutos';
-        } else if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
-          errorMessage = 'Não foi possível conectar ao servidor. Verifique se o servidor está rodando';
+        } else if (message.includes('failed to fetch') || message.includes('connection refused') || message.includes('network error')) {
+          errorMessage = 'Não foi possível conectar ao servidor. Verifique se o backend está rodando na porta 3001';
+        } else if (message.includes('timeout')) {
+          errorMessage = 'Timeout na conexão. Verifique sua internet';
         } else {
-          errorMessage = error.message;
+          errorMessage = error.message || 'Erro desconhecido';
         }
       }
       
@@ -138,18 +150,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setError(null);
     
     try {
-      console.log('🔄 Fazendo logout...');
+      console.log('🔄 [AUTH] Fazendo logout...');
       await apiService.logout();
-      console.log('✅ Logout bem-sucedido');
+      console.log('✅ [AUTH] Logout bem-sucedido');
     } catch (error) {
-      console.error('⚠️ Erro no logout (ignorando):', error);
+      console.error('⚠️ [AUTH] Erro no logout (ignorando):', error);
       // Ignorar erros de logout e continuar
     } finally {
       // Sempre limpar os dados locais
       localStorage.removeItem('authToken');
       setUser(null);
       setIsLoading(false);
-      console.log('🧹 Dados locais limpos');
+      setError(null); // ✅ Limpar erro no logout
+      console.log('🧹 [AUTH] Dados locais limpos');
     }
   };
 
@@ -157,7 +170,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     login,
     logout,
-    isLoading,
+    isLoading, // ✅ CORRIGIDO: Usar isLoading consistentemente
     error
   };
 
