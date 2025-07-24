@@ -1,4 +1,4 @@
-// routes/users.js
+// routes/users.js - VERSÃO CORRIGIDA PARA ADMIN GERAL
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import supabase from '../config/supabase.js';
@@ -6,20 +6,35 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// GET USERS (atualizado para permitir acesso de financeiro-pct)
+// GET USERS - Permitir admin geral ver todos os usuários
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { sector, type } = req.query;
 
-    // Segurança extra: só permite listar ATs se for adm ou financeiro-pct
-    if (type === 'at') {
-      const allowed = [
-        'adm-geral', 'adm-aba', 'adm-denver', 'adm-escolar', 'adm-grupo',
-        'financeiro-pct', 'financeiro-ats',
-        'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo',
-      ];
-      if (!allowed.includes(req.user.type)) {
-        return res.status(403).json({ message: 'Access denied for this user type' });
+    console.log('🔍 [GET USERS] Usuário fazendo requisição:', {
+      id: req.user.id,
+      name: req.user.name,
+      type: req.user.type,
+      sector: req.user.sector
+    });
+
+    console.log('📋 [GET USERS] Filtros recebidos:', { sector, type });
+
+    // ✅ CORREÇÃO: Permitir admin geral acessar tudo
+    if (req.user.type === 'adm-geral') {
+      console.log('🔓 [GET USERS] Admin geral - acesso total liberado');
+    } else {
+      // Segurança para outros tipos de usuário
+      if (type === 'at') {
+        const allowed = [
+          'adm-aba', 'adm-denver', 'adm-escolar', 'adm-grupo',
+          'financeiro-pct', 'financeiro-ats',
+          'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo',
+        ];
+        if (!allowed.includes(req.user.type)) {
+          console.log('❌ [GET USERS] Acesso negado para tipo:', req.user.type);
+          return res.status(403).json({ message: 'Access denied for this user type' });
+        }
       }
     }
 
@@ -28,10 +43,18 @@ router.get('/', authenticateToken, async (req, res) => {
       .select('id, email, name, type, sector, active, created_at, hourly_rate')
       .order('name');
 
-    if (sector) {
-      query = query.eq('sector', sector);
-    } else if (req.user.sector && req.user.type !== 'adm-geral') {
-      query = query.or(`sector.eq.${req.user.sector},sector.is.null`);
+    // Aplicar filtros apenas se não for admin geral
+    if (req.user.type !== 'adm-geral') {
+      if (sector) {
+        query = query.eq('sector', sector);
+      } else if (req.user.sector) {
+        query = query.or(`sector.eq.${req.user.sector},sector.is.null`);
+      }
+    } else {
+      // Admin geral pode filtrar por setor se especificado
+      if (sector) {
+        query = query.eq('sector', sector);
+      }
     }
 
     if (type === 'at') {
@@ -41,38 +64,62 @@ router.get('/', authenticateToken, async (req, res) => {
     const { data: users, error } = await query;
 
     if (error) {
-      console.error('❌ Erro ao buscar usuários:', error);
+      console.error('❌ [GET USERS] Erro ao buscar usuários:', error);
       return res.status(500).json({ message: 'Erro ao buscar usuários', error: error.message });
     }
 
-    console.log('✅ Usuários encontrados:', users?.length || 0);
+    console.log('✅ [GET USERS] Usuários encontrados:', users?.length || 0);
     res.json(users || []);
   } catch (error) {
-    console.error('❌ Erro interno:', error);
+    console.error('❌ [GET USERS] Erro interno:', error);
     res.status(500).json({ message: 'Erro interno do servidor', error: error.message });
   }
 });
 
-// CREATE USER - VERSÃO CORRIGIDA
+// CREATE USER - VERSÃO TOTALMENTE CORRIGIDA
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    console.log('📤 Dados recebidos para criar usuário:', req.body);
+    console.log('📤 [CREATE USER] Dados recebidos:', req.body);
+    console.log('👤 [CREATE USER] Usuário fazendo requisição:', {
+      id: req.user.id,
+      name: req.user.name,
+      type: req.user.type
+    });
     
     const { name, email, type, sector, hourly_rate, password = '123456' } = req.body;
 
+    // ✅ VERIFICAÇÃO DE PERMISSÃO PARA CRIAR USUÁRIOS
+    const canCreateUsers = [
+      'adm-geral',
+      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
+    ];
+
+    if (!canCreateUsers.includes(req.user.type)) {
+      console.log('❌ [CREATE USER] Usuário sem permissão:', req.user.type);
+      return res.status(403).json({ 
+        message: 'Você não tem permissão para criar usuários',
+        userType: req.user.type 
+      });
+    }
+
     // Validações básicas
     if (!name || !email || !type) {
-      console.error('❌ Dados obrigatórios ausentes:', { name: !!name, email: !!email, type: !!type });
+      console.error('❌ [CREATE USER] Dados obrigatórios ausentes:', { 
+        name: !!name, 
+        email: !!email, 
+        type: !!type 
+      });
       return res.status(400).json({ message: 'Nome, email e tipo são obrigatórios' });
     }
 
     // Validar email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      console.error('❌ Email inválido:', email);
-      return res.status(400).json({ message: 'Email inválido' });
+      console.error('❌ [CREATE USER] Email inválido:', email);
+      return res.status(400).json({ message: 'Formato de email inválido' });
     }
 
+    // Validar tipo de usuário
     const validTypes = [
       'financeiro-ats', 'financeiro-pct',
       'at-aba', 'at-denver', 'at-grupo', 'at-escolar',
@@ -82,7 +129,7 @@ router.post('/', authenticateToken, async (req, res) => {
     ];
 
     if (!validTypes.includes(type)) {
-      console.error('❌ Tipo de usuário inválido:', type);
+      console.error('❌ [CREATE USER] Tipo de usuário inválido:', type);
       return res.status(400).json({ message: 'Tipo de usuário inválido' });
     }
 
@@ -92,33 +139,64 @@ router.post('/', authenticateToken, async (req, res) => {
                        (type.startsWith('adm-') && type !== 'adm-geral');
 
     if (needsSector && !sector) {
-      console.error('❌ Setor obrigatório para tipo:', type);
+      console.error('❌ [CREATE USER] Setor obrigatório para tipo:', type);
       return res.status(400).json({ message: 'Setor é obrigatório para esse tipo de usuário' });
     }
 
-    // Verificar se email já existe
-    console.log('🔍 Verificando se email já existe:', email);
-    const { data: existingUser, error: checkError } = await supabase
-      .from('users')
-      .select('id, email')
-      .eq('email', email.toLowerCase())
-      .maybeSingle();
+    // ✅ VERIFICAÇÃO MELHORADA DE EMAIL EXISTENTE
+    console.log('🔍 [CREATE USER] Verificando se email já existe:', email);
+    
+    try {
+      const { data: existingUser, error: checkError } = await supabase
+        .from('users')
+        .select('id, email, type, active')
+        .eq('email', email.toLowerCase())
+        .maybeSingle();
 
-    if (checkError) {
-      console.error('❌ Erro ao verificar email existente:', checkError);
-      return res.status(500).json({ message: 'Erro ao verificar email existente' });
+      if (checkError) {
+        console.error('❌ [CREATE USER] Erro ao verificar email existente:', checkError);
+        return res.status(500).json({ 
+          message: 'Erro ao verificar email existente',
+          error: checkError.message 
+        });
+      }
+
+      if (existingUser) {
+        console.error('❌ [CREATE USER] Email já cadastrado:', {
+          email: email,
+          existingId: existingUser.id,
+          existingType: existingUser.type,
+          existingActive: existingUser.active
+        });
+        return res.status(409).json({ message: 'Este email já está cadastrado no sistema' });
+      }
+
+      console.log('✅ [CREATE USER] Email disponível');
+
+    } catch (emailCheckError) {
+      console.error('❌ [CREATE USER] Erro crítico na verificação de email:', emailCheckError);
+      return res.status(500).json({ 
+        message: 'Erro crítico ao verificar email',
+        error: emailCheckError.message 
+      });
     }
 
-    if (existingUser) {
-      console.error('❌ Email já cadastrado:', email);
-      return res.status(409).json({ message: 'Email já cadastrado no sistema' });
+    // ✅ HASH DA SENHA COM TRATAMENTO DE ERRO
+    console.log('🔐 [CREATE USER] Gerando hash da senha...');
+    let hashedPassword;
+    
+    try {
+      hashedPassword = await bcrypt.hash(password, 12);
+      console.log('✅ [CREATE USER] Hash da senha gerado com sucesso');
+    } catch (hashError) {
+      console.error('❌ [CREATE USER] Erro ao gerar hash da senha:', hashError);
+      return res.status(500).json({ 
+        message: 'Erro ao processar senha',
+        error: hashError.message 
+      });
     }
 
-    // Hash da senha
-    console.log('🔐 Gerando hash da senha...');
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Preparar dados para inserir
+    // ✅ PREPARAR DADOS PARA INSERÇÃO
     const userData = {
       name: name.trim(),
       email: email.toLowerCase().trim(),
@@ -130,48 +208,76 @@ router.post('/', authenticateToken, async (req, res) => {
       created_at: new Date().toISOString()
     };
 
-    console.log('💾 Inserindo usuário no banco com dados:', {
+    console.log('💾 [CREATE USER] Dados preparados para inserção:', {
       ...userData,
       password: '[HIDDEN]'
     });
 
-    // Inserir no banco
-    const { data: newUser, error: insertError } = await supabase
-      .from('users')
-      .insert(userData)
-      .select('id, name, email, type, sector, active, created_at, hourly_rate')
-      .single();
+    // ✅ INSERÇÃO NO BANCO COM MELHOR TRATAMENTO DE ERRO
+    try {
+      console.log('🚀 [CREATE USER] Inserindo no banco de dados...');
+      
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert(userData)
+        .select('id, name, email, type, sector, active, created_at, hourly_rate')
+        .single();
 
-    if (insertError) {
-      console.error('❌ Erro detalhado ao inserir usuário:', insertError);
-      
-      // Tratar erros específicos
-      if (insertError.code === '23505') {
-        return res.status(409).json({ message: 'Email já cadastrado' });
+      if (insertError) {
+        console.error('❌ [CREATE USER] Erro detalhado ao inserir usuário:', {
+          error: insertError,
+          code: insertError.code,
+          message: insertError.message,
+          details: insertError.details,
+          hint: insertError.hint
+        });
+        
+        // Tratar erros específicos do Supabase/PostgreSQL
+        if (insertError.code === '23505') {
+          return res.status(409).json({ message: 'Email já cadastrado (violação de unicidade)' });
+        } else if (insertError.code === '23514') {
+          return res.status(400).json({ message: 'Dados violam restrições do banco de dados' });
+        } else if (insertError.code === '23502') {
+          return res.status(400).json({ message: 'Campo obrigatório ausente' });
+        }
+        
+        return res.status(500).json({ 
+          message: 'Erro ao criar usuário no banco de dados',
+          error: insertError.message,
+          code: insertError.code,
+          details: insertError.details || insertError.hint
+        });
       }
-      
+
+      if (!newUser) {
+        console.error('❌ [CREATE USER] Usuário não foi retornado após inserção');
+        return res.status(500).json({ message: 'Falha ao criar usuário - resposta vazia do banco' });
+      }
+
+      console.log('✅ [CREATE USER] Usuário criado com sucesso:', {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email,
+        type: newUser.type,
+        sector: newUser.sector
+      });
+
+      res.status(201).json({
+        success: true,
+        message: 'Usuário criado com sucesso',
+        user: newUser
+      });
+
+    } catch (insertCriticalError) {
+      console.error('❌ [CREATE USER] Erro crítico na inserção:', insertCriticalError);
       return res.status(500).json({ 
-        message: 'Erro ao criar usuário no banco de dados',
-        error: insertError.message,
-        details: insertError.details || insertError.hint
+        message: 'Erro crítico ao inserir usuário',
+        error: insertCriticalError.message 
       });
     }
 
-    if (!newUser) {
-      console.error('❌ Usuário não foi criado - resposta vazia');
-      return res.status(500).json({ message: 'Falha ao criar usuário - resposta vazia' });
-    }
-
-    console.log('✅ Usuário criado com sucesso:', newUser);
-
-    res.status(201).json({
-      success: true,
-      message: 'Usuário criado com sucesso',
-      user: newUser
-    });
-
   } catch (error) {
-    console.error('❌ Erro interno ao criar usuário:', error);
+    console.error('❌ [CREATE USER] Erro interno geral:', error);
     res.status(500).json({ 
       message: 'Erro interno do servidor',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
@@ -185,16 +291,30 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { name, email, type, sector, active, hourly_rate } = req.body;
 
-    console.log('📝 Atualizando usuário:', id, req.body);
+    console.log('📝 [UPDATE USER] Atualizando usuário:', id, req.body);
+    console.log('👤 [UPDATE USER] Usuário fazendo requisição:', req.user.type);
+
+    // Verificar permissão para atualizar usuários
+    const canUpdateUsers = [
+      'adm-geral',
+      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
+    ];
+
+    if (!canUpdateUsers.includes(req.user.type)) {
+      return res.status(403).json({ 
+        message: 'Você não tem permissão para atualizar usuários' 
+      });
+    }
 
     // Validar se usuário existe
     const { data: existingUser, error: checkError } = await supabase
       .from('users')
-      .select('id')
+      .select('id, type')
       .eq('id', id)
       .single();
 
     if (checkError || !existingUser) {
+      console.log('❌ [UPDATE USER] Usuário não encontrado:', id);
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
@@ -216,11 +336,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
       .single();
 
     if (updateError) {
-      console.error('❌ Erro ao atualizar usuário:', updateError);
+      console.error('❌ [UPDATE USER] Erro ao atualizar usuário:', updateError);
       return res.status(500).json({ message: 'Erro ao atualizar usuário' });
     }
 
-    console.log('✅ Usuário atualizado:', updatedUser);
+    console.log('✅ [UPDATE USER] Usuário atualizado:', updatedUser);
 
     res.json({
       success: true,
@@ -228,7 +348,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       user: updatedUser
     });
   } catch (error) {
-    console.error('❌ Erro interno:', error);
+    console.error('❌ [UPDATE USER] Erro interno:', error);
     res.status(500).json({ message: 'Erro interno do servidor' });
   }
 });
@@ -238,7 +358,20 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('🗑️ Iniciando exclusão completa do usuário:', id);
+    console.log('🗑️ [DELETE USER] Iniciando exclusão completa do usuário:', id);
+    console.log('👤 [DELETE USER] Usuário fazendo requisição:', req.user.type);
+
+    // Verificar permissão para deletar usuários
+    const canDeleteUsers = [
+      'adm-geral',
+      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
+    ];
+
+    if (!canDeleteUsers.includes(req.user.type)) {
+      return res.status(403).json({ 
+        message: 'Você não tem permissão para excluir usuários' 
+      });
+    }
 
     // 1. Verificar se o usuário existe e obter dados
     const { data: existingUser, error: fetchError } = await supabase
@@ -248,11 +381,11 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       .single();
 
     if (fetchError || !existingUser) {
-      console.error('❌ Usuário não encontrado:', fetchError);
+      console.error('❌ [DELETE USER] Usuário não encontrado:', fetchError);
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
-    console.log('🔍 Usuário encontrado:', existingUser.name, '- Tipo:', existingUser.type);
+    console.log('🔍 [DELETE USER] Usuário encontrado:', existingUser.name, '- Tipo:', existingUser.type);
 
     let deletedData = {
       user: existingUser.name,
@@ -264,10 +397,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
     // 2. SE FOR UM AT, DELETAR TODOS OS DADOS RELACIONADOS
     if (existingUser.type && existingUser.type.startsWith('at-')) {
-      console.log('👨‍⚕️ Usuário é um AT - iniciando limpeza completa...');
+      console.log('👨‍⚕️ [DELETE USER] Usuário é um AT - iniciando limpeza completa...');
 
       // 2.1. DELETAR TODAS AS SESSÕES DO AT
-      console.log('🗑️ Deletando todas as sessões do AT...');
+      console.log('🗑️ [DELETE USER] Deletando todas as sessões do AT...');
       const { data: deletedSessions, error: sessionsError } = await supabase
         .from('sessions')
         .delete()
@@ -275,7 +408,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         .select('id');
 
       if (sessionsError) {
-        console.error('❌ Erro ao deletar sessões:', sessionsError);
+        console.error('❌ [DELETE USER] Erro ao deletar sessões:', sessionsError);
         return res.status(500).json({ 
           message: 'Erro ao deletar sessões do AT', 
           error: sessionsError.message 
@@ -283,10 +416,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       }
 
       deletedData.sessionsDeleted = deletedSessions?.length || 0;
-      console.log(`✅ ${deletedData.sessionsDeleted} sessões deletadas`);
+      console.log(`✅ [DELETE USER] ${deletedData.sessionsDeleted} sessões deletadas`);
 
       // 2.2. DELETAR TODAS AS SUPERVISÕES DO AT
-      console.log('🗑️ Deletando todas as supervisões do AT...');
+      console.log('🗑️ [DELETE USER] Deletando todas as supervisões do AT...');
       const { data: deletedSupervisions, error: supervisionsError } = await supabase
         .from('supervisions')
         .delete()
@@ -294,7 +427,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         .select('id');
 
       if (supervisionsError) {
-        console.error('❌ Erro ao deletar supervisões:', supervisionsError);
+        console.error('❌ [DELETE USER] Erro ao deletar supervisões:', supervisionsError);
         return res.status(500).json({ 
           message: 'Erro ao deletar supervisões do AT', 
           error: supervisionsError.message 
@@ -302,10 +435,10 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       }
 
       deletedData.supervisionsDeleted = deletedSupervisions?.length || 0;
-      console.log(`✅ ${deletedData.supervisionsDeleted} supervisões deletadas`);
+      console.log(`✅ [DELETE USER] ${deletedData.supervisionsDeleted} supervisões deletadas`);
 
       // 2.3. DESVINCULAR PACIENTES DO AT (setar at_id como null)
-      console.log('🔗 Desvinculando pacientes do AT...');
+      console.log('🔗 [DELETE USER] Desvinculando pacientes do AT...');
       const { data: unlinkedPatients, error: unlinkError } = await supabase
         .from('patients')
         .update({ at_id: null })
@@ -313,7 +446,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         .select('id, name');
 
       if (unlinkError) {
-        console.error('❌ Erro ao desvincular pacientes:', unlinkError);
+        console.error('❌ [DELETE USER] Erro ao desvincular pacientes:', unlinkError);
         return res.status(500).json({ 
           message: 'Erro ao desvincular pacientes do AT', 
           error: unlinkError.message 
@@ -321,16 +454,16 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       }
 
       deletedData.patientsUnlinked = unlinkedPatients?.length || 0;
-      console.log(`✅ ${deletedData.patientsUnlinked} pacientes desvinculados do AT`);
+      console.log(`✅ [DELETE USER] ${deletedData.patientsUnlinked} pacientes desvinculados do AT`);
 
       if (unlinkedPatients && unlinkedPatients.length > 0) {
-        console.log('📋 Pacientes desvinculados:', unlinkedPatients.map(p => p.name).join(', '));
+        console.log('📋 [DELETE USER] Pacientes desvinculados:', unlinkedPatients.map(p => p.name).join(', '));
       }
     }
 
     // 3. SE FOR PAIS, VERIFICAR SE HÁ PACIENTES VINCULADOS
     if (existingUser.type === 'pais') {
-      console.log('👪 Usuário é um responsável - verificando pacientes vinculados...');
+      console.log('👪 [DELETE USER] Usuário é um responsável - verificando pacientes vinculados...');
       
       const { data: linkedPatients, error: patientsError } = await supabase
         .from('patients')
@@ -338,14 +471,14 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         .or(`parent_email.eq.${existingUser.email},parent_email2.eq.${existingUser.email}`);
 
       if (patientsError) {
-        console.error('❌ Erro ao verificar pacientes vinculados:', patientsError);
+        console.error('❌ [DELETE USER] Erro ao verificar pacientes vinculados:', patientsError);
         return res.status(500).json({ 
           message: 'Erro ao verificar pacientes vinculados ao responsável' 
         });
       }
 
       if (linkedPatients && linkedPatients.length > 0) {
-        console.log('⚠️ Responsável tem pacientes vinculados:', linkedPatients.map(p => p.name));
+        console.log('⚠️ [DELETE USER] Responsável tem pacientes vinculados:', linkedPatients.map(p => p.name));
         return res.status(409).json({
           message: 'Não é possível excluir este responsável. Há pacientes vinculados a ele.',
           linkedPatients: linkedPatients.map(p => p.name),
@@ -355,21 +488,21 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 
     // 4. DELETAR O USUÁRIO
-    console.log('🗑️ Deletando o usuário...');
+    console.log('🗑️ [DELETE USER] Deletando o usuário...');
     const { error: deleteUserError } = await supabase
       .from('users')
       .delete()
       .eq('id', id);
 
     if (deleteUserError) {
-      console.error('❌ Erro ao deletar usuário:', deleteUserError);
+      console.error('❌ [DELETE USER] Erro ao deletar usuário:', deleteUserError);
       return res.status(500).json({ 
         message: 'Erro ao deletar usuário', 
         error: deleteUserError.message 
       });
     }
 
-    console.log('✅ Usuário deletado permanentemente');
+    console.log('✅ [DELETE USER] Usuário deletado permanentemente');
 
     res.status(200).json({
       success: true,
@@ -378,7 +511,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erro interno ao excluir usuário:', error);
+    console.error('❌ [DELETE USER] Erro interno ao excluir usuário:', error);
     res.status(500).json({
       message: 'Erro interno ao excluir usuário completamente',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
@@ -399,37 +532,44 @@ router.get('/email-exists', authenticateToken, async (req, res) => {
     .maybeSingle();
 
   if (error) {
-    console.error('❌ Erro ao verificar email:', error);
+    console.error('❌ [EMAIL EXISTS] Erro ao verificar email:', error);
     return res.status(500).json({ message: 'Erro ao verificar e-mail', error: error.message });
   }
 
   res.json({ exists: !!data });
 });
 
-// CHECK IF EMAIL IS AVAILABLE
+// CHECK IF EMAIL IS AVAILABLE - VERSÃO CORRIGIDA
 router.get('/email/:email', async (req, res) => {
   const { email } = req.params;
 
   try {
-    console.log('🔍 Verificando disponibilidade do email:', email);
+    console.log('🔍 [EMAIL AVAILABLE] Verificando disponibilidade do email:', email);
     
     const { data, error } = await supabase
       .from('users')
-      .select('id')
+      .select('id, type, active')
       .eq('email', email.toLowerCase())
       .maybeSingle();
 
     if (error) {
-      console.error('❌ Erro ao verificar email:', error);
+      console.error('❌ [EMAIL AVAILABLE] Erro ao verificar email:', error);
       return res.status(500).json({ error: 'Erro ao verificar e-mail' });
     }
 
     const isAvailable = !data;
-    console.log('✅ Email disponível:', isAvailable);
+    console.log('✅ [EMAIL AVAILABLE] Email disponível:', isAvailable);
+    
+    if (data) {
+      console.log('📋 [EMAIL AVAILABLE] Email já cadastrado para:', {
+        type: data.type,
+        active: data.active
+      });
+    }
     
     res.json({ isAvailable });
   } catch (err) {
-    console.error('❌ Erro interno:', err);
+    console.error('❌ [EMAIL AVAILABLE] Erro interno:', err);
     res.status(500).json({ error: 'Erro interno ao verificar e-mail' });
   }
 });
