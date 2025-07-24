@@ -11,8 +11,8 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
-  console.error("❌ Missing Supabase environment variables!");
-  console.error("Please configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env file");
+  console.error("❌ Variáveis de ambiente Supabase ausentes!");
+  console.error("Por favor, configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env file");
   process.exit(1);
 }
 
