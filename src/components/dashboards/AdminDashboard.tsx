@@ -81,6 +81,9 @@ export const AdminDashboard: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   
+  // Estados para confirmação
+  const [confirmingSession, setConfirmingSession] = useState<string | null>(null);
+  
   const [showATForm, setShowATForm] = useState(false);
   const [showPatientForm, setShowPatientForm] = useState(false);
   const [editingAT, setEditingAT] = useState<string | null>(null);
@@ -153,98 +156,76 @@ export const AdminDashboard: React.FC = () => {
     );
   });
 
- // ✅ CORREÇÃO PRINCIPAL: Função de confirmação de atendimentos MELHORADA
+  // ✅ FUNÇÃO DE CONFIRMAÇÃO SIMPLIFICADA E CORRIGIDA
   const handleConfirmSession = async (sessionId: string) => {
+    // Prevenir múltiplas confirmações simultâneas
+    if (confirmingSession) {
+      console.log('⚠️ Já confirmando outra sessão, aguarde...');
+      return;
+    }
+
     try {
-      console.log('✅ [ADMIN] Confirmando sessão:', sessionId);
+      setConfirmingSession(sessionId);
+      console.log('✅ [ADMIN] Iniciando confirmação da sessão:', sessionId);
       
-      // Obter dados da sessão antes da confirmação para debugging
+      // Buscar dados da sessão para logs
       const sessionToConfirm = sessions.find(s => s.id === sessionId);
-      console.log('🔍 Sessão a ser confirmada:', {
-        id: sessionToConfirm?.id,
-        patient_id: sessionToConfirm?.patient_id,
-        at_id: sessionToConfirm?.at_id,
-        is_confirmed: sessionToConfirm?.is_confirmed,
-        date: sessionToConfirm?.date
+      if (!sessionToConfirm) {
+        throw new Error('Sessão não encontrada');
+      }
+
+      if (sessionToConfirm.is_confirmed) {
+        alert('⚠️ Esta sessão já foi confirmada!');
+        return;
+      }
+
+      console.log('🔍 Confirmando sessão:', {
+        id: sessionToConfirm.id,
+        patient_id: sessionToConfirm.patient_id,
+        at_id: sessionToConfirm.at_id,
+        date: sessionToConfirm.date
       });
       
-      if (!sessionToConfirm) {
-        console.error('❌ Sessão não encontrada na lista local');
-        alert('❌ Sessão não encontrada');
-        return;
-      }
-      
-      if (sessionToConfirm.is_confirmed) {
-        console.log('⚠️ Sessão já confirmada');
-        alert('⚠️ Esta sessão já foi confirmada');
-        return;
-      }
-      
-      // Confirmar via API
-      console.log('📤 Enviando confirmação para API...');
+      // Chamar API de confirmação
       const response = await apiService.confirmSession(sessionId);
-      console.log('📥 Resposta da API de confirmação:', response);
+      console.log('📥 Resposta da confirmação:', response);
       
-      // ✅ CORREÇÃO: Recarregar dados de forma mais robusta
+      // ✅ RECARREGAR DADOS IMEDIATAMENTE APÓS CONFIRMAÇÃO
       console.log('🔄 Recarregando dados após confirmação...');
-      
-      // Recarregar com delay para garantir que o banco foi atualizado
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Recarregar todas as sessões e pacientes
       const [updatedSessions, updatedPatients] = await Promise.all([
         apiService.getSessions({ month: selectedMonth, year: selectedYear }),
         apiService.getPatients()
       ]);
       
-      console.log('📊 Dados recarregados:');
-      console.log('- Total de sessões:', updatedSessions.length);
-      console.log('- Total de pacientes:', updatedPatients.length);
+      // Atualizar estados
+      setSessions(updatedSessions);
+      setPatients(updatedPatients);
       
-      // Verificar se a sessão foi realmente confirmada
+      // Verificar se a confirmação foi bem-sucedida
       const updatedSession = updatedSessions.find(s => s.id === sessionId);
-      console.log('🔍 Sessão após confirmação:', {
-        id: updatedSession?.id,
-        is_confirmed: updatedSession?.is_confirmed,
-        confirmed_at: updatedSession?.confirmed_at,
-        confirmed_by: updatedSession?.confirmed_by
-      });
-      
       if (updatedSession && updatedSession.is_confirmed) {
-        console.log('✅ Confirmação bem-sucedida!');
-        
-        // Atualizar estados
-        setSessions(updatedSessions);
-        setPatients(updatedPatients);
-        
-        // Buscar nome do paciente para mensagem
         const patient = updatedPatients.find(p => p.id === updatedSession.patient_id);
         const patientName = patient?.name || 'Paciente';
         
-        alert(`✅ Atendimento de ${patientName} confirmado com sucesso!\n\n📱 Agora estará visível para os pais no painel deles.`);
-        
+        console.log('✅ Confirmação bem-sucedida!');
+        alert(`✅ Atendimento de ${patientName} confirmado com sucesso!\n\n📱 Agora está visível para os pais no painel deles.`);
       } else {
-        console.error('❌ Sessão não foi confirmada corretamente');
-        alert('❌ Erro: A sessão não foi confirmada. Verifique os logs e tente novamente.');
+        throw new Error('Confirmação não foi aplicada corretamente');
       }
       
     } catch (error) {
       console.error('❌ Erro ao confirmar sessão:', error);
       
-      // Mensagem de erro mais específica e útil
       let errorMessage = 'Erro ao confirmar atendimento';
-      
       if (error instanceof Error) {
         if (error.message.includes('404')) {
-          errorMessage = '❌ Atendimento não encontrado no sistema';
+          errorMessage = '❌ Atendimento não encontrado';
         } else if (error.message.includes('403')) {
           errorMessage = '❌ Você não tem permissão para confirmar este atendimento';
         } else if (error.message.includes('401')) {
           errorMessage = '❌ Sessão expirada. Faça login novamente';
         } else if (error.message.includes('500')) {
-          errorMessage = '❌ Erro interno do servidor. Contate o suporte técnico';
-        } else if (error.message.includes('Network')) {
-          errorMessage = '❌ Erro de conexão. Verifique sua internet e tente novamente';
+          errorMessage = '❌ Erro no servidor. Contate o suporte técnico';
         } else {
           errorMessage = `❌ ${error.message}`;
         }
@@ -252,9 +233,8 @@ export const AdminDashboard: React.FC = () => {
       
       alert(errorMessage);
       
-      // Tentar recarregar dados mesmo com erro para sincronizar
+      // Tentar recarregar dados mesmo com erro
       try {
-        console.log('🔄 Tentando recarregar dados após erro...');
         const [sessionsData, patientsData] = await Promise.all([
           apiService.getSessions({ month: selectedMonth, year: selectedYear }),
           apiService.getPatients()
@@ -264,6 +244,8 @@ export const AdminDashboard: React.FC = () => {
       } catch (reloadError) {
         console.error('❌ Erro ao recarregar dados:', reloadError);
       }
+    } finally {
+      setConfirmingSession(null);
     }
   };
 
@@ -579,6 +561,7 @@ export const AdminDashboard: React.FC = () => {
     return (
       <div className="container mx-auto px-4 py-6">
         <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-700 mx-auto mb-4"></div>
           <p className="text-lg text-gray-600">Carregando dados...</p>
         </div>
       </div>
@@ -772,7 +755,7 @@ export const AdminDashboard: React.FC = () => {
         </Card>
       )}
 
-     {/* ABA: Confirmar Atendimentos - COMPLETAMENTE CORRIGIDA */}
+      {/* ABA: Confirmar Atendimentos - CORRIGIDA */}
       {activeTab === 'confirmacao' && (
         <Card>
           <CardHeader>
@@ -790,10 +773,10 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {/* Mostrar contador de sessões pendentes */}
+            {/* Contador de sessões pendentes */}
             <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
               <div className="flex items-center space-x-2">
-                <AlertCircle className="w-5 h-5 text-yellow-600" />
+                <AlertTriangle className="w-5 h-5 text-yellow-600" />
                 <span className="font-semibold text-yellow-800">
                   {pendingSessions.length} atendimento(s) aguardando confirmação
                 </span>
@@ -822,6 +805,7 @@ export const AdminDashboard: React.FC = () => {
                   const patient = patients.find(p => p.id === session.patient_id);
                   const at = ats.find(a => a.id === session.at_id);
                   const hours = calculateHours(session.start_time, session.end_time);
+                  const isConfirming = confirmingSession === session.id;
 
                   return (
                     <TableRow key={session.id} className="hover:bg-yellow-50">
@@ -857,18 +841,29 @@ export const AdminDashboard: React.FC = () => {
                             size="sm"
                             variant="success"
                             onClick={() => handleConfirmSession(session.id)}
+                            disabled={isConfirming}
                             title="✅ Confirmar atendimento - Ficará visível para os pais"
-                            className="bg-green-600 hover:bg-green-700 text-white"
+                            className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
                           >
-                            <CheckCircle size={14} className="mr-1" />
-                            Confirmar
+                            {isConfirming ? (
+                              <div className="flex items-center space-x-1">
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>Confirmando...</span>
+                              </div>
+                            ) : (
+                              <>
+                                <CheckCircle size={14} className="mr-1" />
+                                Confirmar
+                              </>
+                            )}
                           </Button>
                           <Button
                             size="sm"
                             variant="danger"
                             onClick={() => handleRejectSession(session.id)}
+                            disabled={isConfirming}
                             title="❌ Rejeitar atendimento - Será removido do sistema"
-                            className="bg-red-600 hover:bg-red-700 text-white"
+                            className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
                           >
                             <X size={14} className="mr-1" />
                             Rejeitar
@@ -905,33 +900,6 @@ export const AdminDashboard: React.FC = () => {
                     </Button>
                   </div>
                 )}
-              </div>
-            )}
-            
-            {/* Ações em lote para múltiplas confirmações */}
-            {pendingSessions.length > 1 && (
-              <div className="mt-6 p-4 bg-gray-50 rounded-lg border">
-                <h4 className="font-semibold text-gray-800 mb-3">⚡ Ações em Lote</h4>
-                <div className="flex space-x-3">
-                  <Button
-                    variant="success"
-                    size="sm"
-                    onClick={() => {
-                      if (window.confirm(`Confirmar TODOS os ${pendingSessions.length} atendimentos pendentes?\n\nEsta ação tornará todos visíveis para os pais.`)) {
-                        // Implementar confirmação em lote se necessário
-                        alert('Funcionalidade de confirmação em lote será implementada em breve!');
-                      }
-                    }}
-                    className="bg-green-600 hover:bg-green-700"
-                  >
-                    <CheckCircle size={16} className="mr-2" />
-                    Confirmar Todos ({pendingSessions.length})
-                  </Button>
-                  
-                  <div className="text-xs text-gray-500 flex items-center">
-                    ⚠️ Use com cuidado: esta ação afetará múltiplos atendimentos
-                  </div>
-                </div>
               </div>
             )}
           </CardContent>
