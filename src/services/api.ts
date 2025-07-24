@@ -21,13 +21,31 @@ class ApiService {
   }
 
   private async handleResponse(response: Response): Promise<any> {
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ 
-        message: `Erro ${response.status}: ${response.statusText}` 
-      }));
-      throw new Error(error.message || 'Erro na requisição');
+    const contentType = response.headers.get('content-type');
+    let responseData;
+
+    try {
+      if (contentType && contentType.includes('application/json')) {
+        responseData = await response.json();
+      } else {
+        const text = await response.text();
+        responseData = { message: text || `Erro ${response.status}: ${response.statusText}` };
+      }
+    } catch (parseError) {
+      responseData = { message: `Erro ${response.status}: ${response.statusText}` };
     }
-    return response.json();
+
+    if (!response.ok) {
+      console.error('❌ Erro na resposta da API:', {
+        status: response.status,
+        statusText: response.statusText,
+        data: responseData
+      });
+      
+      throw new Error(responseData.message || responseData.error || 'Erro na requisição');
+    }
+
+    return responseData;
   }
 
   private buildUrl(endpoint: string, params?: Record<string, string>): string {
@@ -373,20 +391,26 @@ class ApiService {
     }
   }
 
-  // Verificar se email já existe
+  // Verificar se email já existe - VERSÃO CORRIGIDA
   async checkEmailNotRegistered(email: string): Promise<boolean> {
     try {
+      console.log('🔍 Verificando se email está disponível:', email);
+      
       const encodedEmail = encodeURIComponent(email);
       const response = await fetch(`${API_BASE_URL}/users/email/${encodedEmail}`, {
         headers: this.getAuthHeaders()
       });
 
       if (!response.ok) {
+        console.error('❌ Erro ao verificar email:', response.status);
         return false;
       }
       
-      const result = await response.json();
-      return result?.isAvailable || false;
+      const result = await this.handleResponse(response);
+      const isAvailable = result?.isAvailable || false;
+      
+      console.log('✅ Email disponível:', isAvailable);
+      return isAvailable;
       
     } catch (error) {
       console.error('❌ Erro ao verificar email:', error);
@@ -394,7 +418,7 @@ class ApiService {
     }
   }
 
-  // Gerenciar usuários - ATUALIZADO com suporte a hourly_rate
+  // Gerenciar usuários - VERSÃO CORRIGIDA
   async createUser(userData: {
     name: string;
     email: string;
@@ -402,18 +426,26 @@ class ApiService {
     sector?: string;
     hourly_rate?: number;
   }): Promise<any> {
-    console.log('📤 Criando usuário no banco:', userData);
+    console.log('📤 Criando usuário no frontend:', userData);
     
-    const response = await fetch(`${API_BASE_URL}/users`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify(userData)
-    });
-    
-    const result = await this.handleResponse(response);
-    console.log('✅ Usuário criado:', result);
-    
-    return result;
+    try {
+      const response = await fetch(`${API_BASE_URL}/users`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(userData)
+      });
+      
+      console.log('📊 Status da resposta:', response.status);
+      
+      const result = await this.handleResponse(response);
+      console.log('✅ Usuário criado com sucesso:', result);
+      
+      return result;
+      
+    } catch (error) {
+      console.error('❌ Erro ao criar usuário:', error);
+      throw error;
+    }
   }
 
   async updateUser(id: string, userData: any): Promise<any> {
@@ -455,6 +487,8 @@ class ApiService {
     if (filters?.type) {
       url.searchParams.append('type', filters.type);
     }
+    
+    console.log('🌐 URL final:', url.toString());
     
     const response = await fetch(url.toString(), {
       headers: this.getAuthHeaders()
