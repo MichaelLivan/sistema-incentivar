@@ -1,34 +1,41 @@
+// ✅ ARQUIVO SUPERVISIONS.JS CORRIGIDO - ROTAS PARA SUPERVISÕES
 import express from 'express';
 import supabase from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get supervisions
+// ✅ LISTAR SUPERVISÕES
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { month, year, at_id } = req.query;
+    
+    console.log('🔍 [SUPERVISIONS] Carregando supervisões para usuário:', req.user.type);
     
     let query = supabase
       .from('supervisions')
       .select(`
         *,
-        at:users!supervisions_at_id_fkey(name),
-        coordinator:users!supervisions_coordinator_id_fkey(name)
+        at:users!supervisions_at_id_fkey(id, name, sector),
+        coordinator:users!supervisions_coordinator_id_fkey(id, name, sector)
       `)
       .order('date', { ascending: false })
       .order('start_time', { ascending: false });
 
-    // Apply filters based on user type
+    // ✅ FILTROS POR TIPO DE USUÁRIO
     if (req.user.type.startsWith('coordenacao-')) {
+      // Coordenadores veem supervisões que criaram
       query = query.eq('coordinator_id', req.user.id);
     } else if (req.user.type.startsWith('at-')) {
+      // ATs veem suas próprias supervisões
       query = query.eq('at_id', req.user.id);
     } else if (req.user.sector && req.user.type !== 'adm-geral') {
+      // Usuários setoriais veem supervisões do seu setor
       query = query.eq('sector', req.user.sector);
     }
+    // Admin geral vê todas
 
-    // Additional filters
+    // ✅ FILTROS ADICIONAIS
     if (at_id) {
       query = query.eq('at_id', at_id);
     }
@@ -42,102 +49,149 @@ router.get('/', authenticateToken, async (req, res) => {
     const { data: supervisions, error } = await query;
 
     if (error) {
-      console.error('Error fetching supervisions:', error);
-      return res.status(500).json({ message: 'Error fetching supervisions' });
+      console.error('❌ [SUPERVISIONS] Erro ao buscar supervisões:', error);
+      return res.status(500).json({ message: 'Erro ao buscar supervisões' });
     }
 
-    res.json(supervisions);
+    console.log(`✅ [SUPERVISIONS] ${supervisions?.length || 0} supervisões encontradas`);
+    res.json(supervisions || []);
+
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao buscar supervisões' });
   }
 });
 
-// Create supervision - CORRIGIDO: Permitir ATs criarem suas próprias supervisões
+// ✅ CRIAR SUPERVISÃO
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { at_id, start_time, end_time, date, observations } = req.body;
 
+    console.log('📤 [SUPERVISIONS] Criando supervisão:', {
+      at_id,
+      start_time,
+      end_time,
+      date,
+      user: req.user.type,
+      sector: req.user.sector
+    });
+
+    // ✅ VALIDAÇÕES
     if (!at_id || !start_time || !end_time || !date) {
-      return res.status(400).json({ message: 'All required fields must be provided' });
+      return res.status(400).json({ message: 'Todos os campos obrigatórios devem ser preenchidos' });
     }
 
-    // ✅ CORREÇÃO: Permitir ATs criarem suas próprias supervisões
-    // ✅ CORREÇÃO: Permitir coordenadores criarem supervisões para qualquer AT
-    // ✅ CORREÇÃO: Permitir admins criarem supervisões
+    // ✅ VERIFICAR PERMISSÕES
+    // ATs podem criar supervisões para si mesmos
+    // Coordenadores podem criar supervisões para qualquer AT
+    // Admins podem criar supervisões
     if (!req.user.type.startsWith('coordenacao-') && 
         !req.user.type.startsWith('adm-') && 
         !req.user.type.startsWith('at-')) {
-      return res.status(403).json({ message: 'Only coordinators, admins, or ATs can create supervisions' });
+      return res.status(403).json({ message: 'Você não tem permissão para criar supervisões' });
     }
 
-    // Se for um AT, só pode criar supervisão para si mesmo
+    // ✅ SE FOR UM AT, SÓ PODE CRIAR SUPERVISÃO PARA SI MESMO
     if (req.user.type.startsWith('at-') && at_id !== req.user.id) {
-      return res.status(403).json({ message: 'ATs can only create supervisions for themselves' });
+      return res.status(403).json({ message: 'ATs só podem criar supervisões para si mesmos' });
     }
 
-    // Calculate hours
-    const startMinutes = parseInt(start_time.split(':')[0]) * 60 + parseInt(start_time.split(':')[1]);
-    const endMinutes = parseInt(end_time.split(':')[0]) * 60 + parseInt(end_time.split(':')[1]);
-   let hours = (endMinutes - startMinutes) / 60;
-   
-   // Arredondar para o múltiplo de 0.5 mais próximo (30 minutos)
-   hours = Math.round(hours * 2) / 2;
+    // ✅ VERIFICAR SE O AT EXISTE
+    const { data: atUser, error: atError } = await supabase
+      .from('users')
+      .select('id, name, sector, type')
+      .eq('id', at_id)
+      .single();
+
+    if (atError || !atUser) {
+      return res.status(404).json({ message: 'AT não encontrado' });
+    }
+
+    if (!atUser.type.startsWith('at-')) {
+      return res.status(400).json({ message: 'Usuário selecionado não é um AT' });
+    }
+
+    // ✅ CALCULAR HORAS
+    const calculateHours = (start, end) => {
+      const [startHour, startMin] = start.split(':').map(Number);
+      const [endHour, endMin] = end.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      const diffMinutes = endMinutes - startMinutes;
+      return Math.round((Math.max(0, diffMinutes) / 60) * 2) / 2; // Arredondar para 0.5
+    };
+
+    const hours = calculateHours(start_time, end_time);
 
     if (hours <= 0) {
-      return res.status(400).json({ message: 'End time must be after start time' });
+      return res.status(400).json({ message: 'Horário de fim deve ser posterior ao horário de início' });
     }
 
-    // ✅ CORREÇÃO: Definir coordinator_id baseado no tipo de usuário
+    // ✅ VERIFICAR DUPLICATAS
+    const { data: existingSupervision } = await supabase
+      .from('supervisions')
+      .select('id')
+      .eq('at_id', at_id)
+      .eq('date', date)
+      .eq('start_time', start_time)
+      .eq('end_time', end_time)
+      .maybeSingle();
+
+    if (existingSupervision) {
+      return res.status(409).json({ message: 'Já existe uma supervisão idêntica registrada' });
+    }
+
+    // ✅ DETERMINAR COORDINATOR_ID E SECTOR
     let coordinatorId;
     let sector;
     
     if (req.user.type.startsWith('at-')) {
       // AT criando supervisão para si mesmo
-      coordinatorId = req.user.id; // O próprio AT é o "coordenador" neste caso
+      coordinatorId = req.user.id;
       sector = req.user.sector;
-      
-      console.log(`✅ AT ${req.user.name} criando supervisão para si mesmo`);
     } else if (req.user.type.startsWith('coordenacao-')) {
       // Coordenador criando supervisão
       coordinatorId = req.user.id;
       sector = req.user.sector;
-      
-      console.log(`✅ Coordenador ${req.user.name} criando supervisão para AT ${at_id}`);
     } else {
       // Admin criando supervisão
       coordinatorId = req.user.id;
-      sector = req.user.sector;
-      
-      console.log(`✅ Admin ${req.user.name} criando supervisão`);
+      sector = atUser.sector; // Usar setor do AT
     }
 
-    // Insert supervision
-    const { data: newSupervision, error } = await supabase
+    // ✅ INSERIR SUPERVISÃO
+    const supervisionData = {
+      at_id,
+      coordinator_id: coordinatorId,
+      start_time,
+      end_time,
+      date,
+      hours,
+      sector: sector,
+      observations: observations || '',
+      created_at: new Date().toISOString()
+    };
+
+    const { data: newSupervision, error: insertError } = await supabase
       .from('supervisions')
-      .insert({
-        at_id,
-        coordinator_id: coordinatorId,
-        start_time,
-        end_time,
-        date,
-        hours,
-        sector: sector,
-        observations: observations || ''
-      })
-      .select()
+      .insert(supervisionData)
+      .select(`
+        *,
+        at:users!supervisions_at_id_fkey(name, sector),
+        coordinator:users!supervisions_coordinator_id_fkey(name, sector)
+      `)
       .single();
 
-    if (error) {
-      console.error('❌ Erro ao criar supervisão:', error);
+    if (insertError) {
+      console.error('❌ [SUPERVISIONS] Erro ao inserir supervisão:', insertError);
       return res.status(500).json({ 
-        message: 'Error creating supervision', 
-        error: error.message,
-        details: error.details || 'No additional details'
+        message: 'Erro ao criar supervisão', 
+        error: insertError.message,
+        details: insertError.details || 'Detalhes não disponíveis'
       });
     }
 
-    console.log('✅ Supervisão criada com sucesso:', {
+    console.log('✅ [SUPERVISIONS] Supervisão criada com sucesso:', {
       id: newSupervision.id,
       at_id: newSupervision.at_id,
       coordinator_id: newSupervision.coordinator_id,
@@ -147,74 +201,95 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
     res.status(201).json({
-      message: 'Supervision created successfully',
+      message: 'Supervisão criada com sucesso',
       supervisionId: newSupervision.id,
       supervision: newSupervision
     });
+
   } catch (error) {
-    console.error('❌ Erro interno:', error);
+    console.error('❌ [SUPERVISIONS] Erro interno ao criar supervisão:', error);
     res.status(500).json({ 
-      message: 'Internal server error',
+      message: 'Erro interno ao criar supervisão',
       error: error.message
     });
   }
 });
 
-// Delete supervision
+// ✅ EXCLUIR SUPERVISÃO
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('🗑️ Tentando deletar supervisão:', id);
+    console.log('🗑️ [SUPERVISIONS] Excluindo supervisão:', id);
 
-    // Check if supervision exists and get details
-    const { data: existingSupervision, error: checkError } = await supabase
+    // ✅ VERIFICAR SE SUPERVISÃO EXISTE
+    const { data: supervision, error: supervisionError } = await supabase
       .from('supervisions')
-      .select('id, date, hours')
+      .select('*')
       .eq('id', id)
       .single();
 
-    if (checkError || !existingSupervision) {
-      console.error('❌ Supervisão não encontrada:', checkError);
-      return res.status(404).json({ message: 'Supervision not found' });
+    if (supervisionError || !supervision) {
+      console.error('❌ [SUPERVISIONS] Supervisão não encontrada:', supervisionError);
+      return res.status(404).json({ message: 'Supervisão não encontrada' });
     }
 
-    console.log('🔍 Supervisão encontrada:', existingSupervision);
+    console.log('🔍 [SUPERVISIONS] Supervisão encontrada:', {
+      id: supervision.id,
+      date: supervision.date,
+      hours: supervision.hours,
+      at_id: supervision.at_id,
+      coordinator_id: supervision.coordinator_id
+    });
 
-    // HARD DELETE - Remove permanently from database
+    // ✅ VERIFICAR PERMISSÃO
+    const canDelete = req.user.type.startsWith('adm-') || 
+                     req.user.type.startsWith('financeiro-') ||
+                     supervision.coordinator_id === req.user.id ||
+                     (req.user.type.startsWith('at-') && supervision.at_id === req.user.id);
+
+    if (!canDelete) {
+      return res.status(403).json({ message: 'Você não tem permissão para excluir esta supervisão' });
+    }
+
+    // ✅ EXCLUIR SUPERVISÃO (HARD DELETE)
     const { error: deleteError } = await supabase
       .from('supervisions')
       .delete()
       .eq('id', id);
 
     if (deleteError) {
-      console.error('❌ Erro ao deletar supervisão:', deleteError);
-      return res.status(500).json({ message: 'Error deleting supervision', error: deleteError.message });
+      console.error('❌ [SUPERVISIONS] Erro ao deletar supervisão:', deleteError);
+      return res.status(500).json({ 
+        message: 'Erro ao excluir supervisão', 
+        error: deleteError.message 
+      });
     }
 
-    console.log('✅ Supervisão deletada permanentemente');
+    console.log('✅ [SUPERVISIONS] Supervisão excluída permanentemente');
     res.json({ 
-      message: 'Supervision deleted successfully',
+      message: 'Supervisão excluída com sucesso',
       deletedSupervision: {
-        id: existingSupervision.id,
-        date: existingSupervision.date,
-        hours: existingSupervision.hours
+        id: supervision.id,
+        date: supervision.date,
+        hours: supervision.hours
       }
     });
+
   } catch (error) {
-    console.error('❌ Erro interno:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao excluir supervisão' });
   }
 });
 
-// Adicionar essas rotas no final do arquivo, antes do "export default router;"
-
-// Get supervision rates
+// ✅ BUSCAR TAXAS DE SUPERVISÃO
 router.get('/rates', authenticateToken, async (req, res) => {
   try {
-    // Only financeiro-ats can access supervision rates
+    console.log('🔍 [SUPERVISIONS] Carregando taxas de supervisão para:', req.user.type);
+    
+    // Apenas financeiro-ats pode acessar taxas de supervisão
     if (req.user.type !== 'financeiro-ats') {
-      return res.status(403).json({ message: 'Access denied' });
+      return res.status(403).json({ message: 'Acesso negado. Apenas financeiro-ats pode acessar taxas de supervisão.' });
     }
 
     const { data: rates, error } = await supabase
@@ -223,12 +298,13 @@ router.get('/rates', authenticateToken, async (req, res) => {
       .single();
 
     if (error && error.code !== 'PGRST116') { // PGRST116 = not found
-      console.error('Error fetching supervision rates:', error);
-      return res.status(500).json({ message: 'Error fetching supervision rates' });
+      console.error('❌ [SUPERVISIONS] Erro ao buscar taxas:', error);
+      return res.status(500).json({ message: 'Erro ao buscar taxas de supervisão' });
     }
 
-    // If no rates found, return default values
+    // Se não há taxas, retornar valores padrão
     if (!rates) {
+      console.log('📋 [SUPERVISIONS] Nenhuma taxa encontrada, retornando valores padrão');
       const defaultRates = {
         aba: 35,
         denver: 35,
@@ -238,53 +314,71 @@ router.get('/rates', authenticateToken, async (req, res) => {
       return res.json(defaultRates);
     }
 
-    res.json({
+    const responseRates = {
       aba: rates.aba || 35,
       denver: rates.denver || 35,
       grupo: rates.grupo || 35,
       escolar: rates.escolar || 35
-    });
+    };
+
+    console.log('✅ [SUPERVISIONS] Taxas de supervisão carregadas:', responseRates);
+    res.json(responseRates);
+
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao buscar taxas' });
   }
 });
 
-// Save supervision rates
+// ✅ SALVAR TAXAS DE SUPERVISÃO
 router.post('/rates', authenticateToken, async (req, res) => {
   try {
     const { aba, denver, grupo, escolar } = req.body;
 
-    // Only financeiro-ats can save supervision rates
+    console.log('💾 [SUPERVISIONS] Salvando taxas de supervisão:', { aba, denver, grupo, escolar });
+    console.log('👤 [SUPERVISIONS] Usuário:', req.user.type);
+
+    // Apenas financeiro-ats pode salvar taxas de supervisão
     if (req.user.type !== 'financeiro-ats') {
-      return res.status(403).json({ message: 'Access denied' });
+      console.log('❌ [SUPERVISIONS] Acesso negado para tipo de usuário:', req.user.type);
+      return res.status(403).json({ message: 'Acesso negado. Apenas financeiro-ats pode salvar taxas de supervisão.' });
     }
 
-    // Validate input
-    if (!aba || !denver || !grupo || !escolar) {
-      return res.status(400).json({ message: 'All rate fields are required' });
+    // ✅ VALIDAR ENTRADA
+    if (aba === undefined || denver === undefined || grupo === undefined || escolar === undefined) {
+      console.log('❌ [SUPERVISIONS] Campos obrigatórios ausentes');
+      return res.status(400).json({ message: 'Todos os campos de taxa (aba, denver, grupo, escolar) são obrigatórios' });
     }
 
-    if (isNaN(aba) || isNaN(denver) || isNaN(grupo) || isNaN(escolar)) {
-      return res.status(400).json({ message: 'All rates must be valid numbers' });
+    if (isNaN(Number(aba)) || isNaN(Number(denver)) || isNaN(Number(grupo)) || isNaN(Number(escolar))) {
+      console.log('❌ [SUPERVISIONS] Valores inválidos fornecidos');
+      return res.status(400).json({ message: 'Todas as taxas devem ser números válidos' });
     }
 
-    // Check if rates already exist
+    const numericRates = {
+      aba: Number(aba),
+      denver: Number(denver),
+      grupo: Number(grupo),
+      escolar: Number(escolar)
+    };
+
+    // ✅ VERIFICAR SE TAXAS JÁ EXISTEM
     const { data: existingRates, error: checkError } = await supabase
       .from('supervision_rates')
       .select('id')
       .single();
 
     let result;
-    if (existingRates) {
-      // Update existing rates
+    if (existingRates && !checkError) {
+      console.log('🔄 [SUPERVISIONS] Atualizando taxas existentes');
+      // Atualizar taxas existentes
       const { data, error } = await supabase
         .from('supervision_rates')
         .update({
-          aba: Number(aba),
-          denver: Number(denver),
-          grupo: Number(grupo),
-          escolar: Number(escolar),
+          aba: numericRates.aba,
+          denver: numericRates.denver,
+          grupo: numericRates.grupo,
+          escolar: numericRates.escolar,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingRates.id)
@@ -293,14 +387,15 @@ router.post('/rates', authenticateToken, async (req, res) => {
       
       result = { data, error };
     } else {
-      // Insert new rates
+      console.log('➕ [SUPERVISIONS] Criando novas taxas');
+      // Inserir novas taxas
       const { data, error } = await supabase
         .from('supervision_rates')
         .insert({
-          aba: Number(aba),
-          denver: Number(denver),
-          grupo: Number(grupo),
-          escolar: Number(escolar)
+          aba: numericRates.aba,
+          denver: numericRates.denver,
+          grupo: numericRates.grupo,
+          escolar: numericRates.escolar
         })
         .select()
         .single();
@@ -309,23 +404,19 @@ router.post('/rates', authenticateToken, async (req, res) => {
     }
 
     if (result.error) {
-      console.error('Error saving supervision rates:', result.error);
-      return res.status(500).json({ message: 'Error saving supervision rates' });
+      console.error('❌ [SUPERVISIONS] Erro ao salvar taxas:', result.error);
+      return res.status(500).json({ message: 'Erro ao salvar taxas de supervisão', error: result.error.message });
     }
 
-    console.log('✅ Supervision rates saved successfully:', result.data);
+    console.log('✅ [SUPERVISIONS] Taxas de supervisão salvas com sucesso:', result.data);
     res.json({
-      message: 'Supervision rates saved successfully',
-      rates: {
-        aba: Number(aba),
-        denver: Number(denver),
-        grupo: Number(grupo),
-        escolar: Number(escolar)
-      }
+      message: 'Taxas de supervisão salvas com sucesso',
+      rates: numericRates
     });
+
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao salvar taxas' });
   }
 });
 
