@@ -10,7 +10,7 @@ import { apiService } from '../../services/api';
 import { Clock, Calendar, User, AlertCircle, X, Search, BookOpen, Users } from 'lucide-react';
 import { formatHours, calculateHours, sumSessionHours, sumHoursSafely } from '../../utils/formatters';
 
-export const ATDashboard: React.FC = () => {
+export const AdminDashboard: React.FC = () => {
   const { user } = useAuth();
   const [patients, setPatients] = useState([]);
   const [allSectorPatients, setAllSectorPatients] = useState([]);
