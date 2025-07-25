@@ -1,12 +1,15 @@
-// VERSÃO CORRIGIDA DO apiService com melhor tratamento de erros
+// VERSÃO COMPLETAMENTE CORRIGIDA DO apiService
+// Remove duplicações, implementa todas as funções necessárias, melhora tratamento de erros
 
 class ApiService {
+  private baseURL: string;
+
   constructor() {
     this.baseURL = this.getApiUrl();
     console.log('🌐 [API] URL configurada:', this.baseURL);
   }
 
-  getApiUrl() {
+  private getApiUrl(): string {
     // Verificar se estamos em produção ou desenvolvimento
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname;
@@ -24,9 +27,9 @@ class ApiService {
     return import.meta.env.VITE_API_URL || '/api';
   }
 
-  getAuthHeaders() {
+  private getAuthHeaders(): Record<string, string> {
     const token = localStorage.getItem('authToken');
-    const headers = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     };
@@ -39,9 +42,9 @@ class ApiService {
   }
 
   // FUNÇÃO MELHORADA DE TRATAMENTO DE ERRO
-  async handleResponse(response, context = '') {
+  private async handleResponse(response: Response, context = ''): Promise<any> {
     const contentType = response.headers.get('content-type');
-    let responseData;
+    let responseData: any;
 
     console.log(`📊 [API${context}] Status: ${response.status}, Content-Type: ${contentType}`);
 
@@ -56,7 +59,7 @@ class ApiService {
       console.error(`❌ [API${context}] Erro ao parsear resposta:`, parseError);
       responseData = { 
         message: `Erro ao processar resposta do servidor (${response.status})`,
-        originalError: parseError.message 
+        originalError: parseError instanceof Error ? parseError.message : String(parseError)
       };
     }
 
@@ -69,7 +72,7 @@ class ApiService {
       });
       
       // Mensagens de erro mais específicas
-      let errorMessage;
+      let errorMessage: string;
       
       switch (response.status) {
         case 400:
@@ -110,8 +113,46 @@ class ApiService {
     return responseData;
   }
 
-  // FUNÇÃO DE LOGIN
-  async login(email, password) {
+  // TESTE BÁSICO DE CONECTIVIDADE - FUNÇÃO ÚNICA E CORRIGIDA
+  async testBasicConnectivity(): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000); // Reduzido para 3s
+      
+      // Testar endpoint de health primeiro
+      const response = await fetch(`${this.baseURL}/health`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeout);
+      
+      // Qualquer resposta do servidor (mesmo 401/403) indica que está rodando
+      return response.status < 500;
+      
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          console.error('❌ [API] Timeout na conexão com o servidor');
+          throw new Error('Timeout na conexão com o servidor');
+        }
+        
+        if (error.message.includes('Failed to fetch') || 
+            error.message.includes('ERR_CONNECTION_REFUSED') ||
+            error.message.includes('ECONNREFUSED')) {
+          console.error('❌ [API] Servidor não está acessível');
+          throw new Error('Servidor não está acessível. Verifique se o backend está rodando na porta 3001');
+        }
+      }
+      
+      console.error('❌ [API] Erro de conectividade:', error);
+      throw error;
+    }
+  }
+
+  // AUTENTICAÇÃO
+  async login(email: string, password: string): Promise<any> {
     console.log('🔐 [API] Fazendo login:', email);
     
     try {
@@ -145,7 +186,7 @@ class ApiService {
     } catch (error) {
       console.error('❌ [API] Erro no login:', error);
       
-      if (error.message.includes('Failed to fetch')) {
+      if (error instanceof Error && error.message.includes('Failed to fetch')) {
         throw new Error('Não foi possível conectar ao servidor. Verifique se o backend está rodando');
       }
       
@@ -153,168 +194,62 @@ class ApiService {
     }
   }
 
-  // FUNÇÃO MELHORADA PARA CRIAR USUÁRIO
-  async createUser(userData) {
-    console.log('📤 [API] Criando usuário:', { ...userData, password: '***' });
-    
+  async verifyToken(): Promise<{ valid: boolean; user?: any }> {
     try {
-      // Validações do lado cliente
-      if (!userData.name?.trim()) {
-        throw new Error('Nome é obrigatório');
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        console.log('⚠️ [API] Nenhum token para verificar');
+        return { valid: false };
       }
       
-      if (!userData.email?.trim()) {
-        throw new Error('Email é obrigatório');
-      }
-      
-      if (!userData.type) {
-        throw new Error('Tipo de usuário é obrigatório');
-      }
-      
-      // Verificar conectividade primeiro
+      // Testar conectividade primeiro
       await this.testBasicConnectivity();
       
-      const response = await fetch(`${this.baseURL}/users`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(userData)
-      });
-      
-      const result = await this.handleResponse(response, ' CREATE USER');
-      return result;
-      
-    } catch (error) {
-      console.error('❌ [API] Erro ao criar usuário:', error);
-      
-      // Tratar erros de rede
-      if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
-        throw new Error('Não foi possível conectar ao servidor. Verifique se o backend está rodando na porta 3001');
-      }
-      
-      throw error;
-    }
-  }
-
-  // FUNÇÃO MELHORADA PARA ATUALIZAR USUÁRIO
-  async updateUser(userId, userData) {
-    console.log('📝 [API] Atualizando usuário:', userId, userData);
-    
-    try {
-      if (!userId) {
-        throw new Error('ID do usuário é obrigatório');
-      }
-      
-      await this.testBasicConnectivity();
-      
-      const response = await fetch(`${this.baseURL}/users/${userId}`, {
-        method: 'PUT',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify(userData)
-      });
-      
-      return await this.handleResponse(response, ' UPDATE USER');
-      
-    } catch (error) {
-      console.error('❌ [API] Erro ao atualizar usuário:', error);
-      throw error;
-    }
-  }
-
-  // FUNÇÃO MELHORADA PARA EXCLUIR USUÁRIO
-  async deleteUser(userId) {
-    console.log('🗑️ [API] Excluindo usuário:', userId);
-    
-    try {
-      if (!userId) {
-        throw new Error('ID do usuário é obrigatório');
-      }
-      
-      await this.testBasicConnectivity();
-      
-      const response = await fetch(`${this.baseURL}/users/${userId}`, {
-        method: 'DELETE',
+      const response = await fetch(`${this.baseURL}/auth/verify`, {
         headers: this.getAuthHeaders()
       });
       
-      return await this.handleResponse(response, ' DELETE USER');
-      
-    } catch (error) {
-      console.error('❌ [API] Erro ao excluir usuário:', error);
-      
-      if (error.message.includes('Failed to fetch')) {
-        throw new Error('Não foi possível conectar ao servidor para excluir o usuário');
+      if (!response.ok) {
+        console.log(`⚠️ [API] Token inválido: ${response.status}`);
+        localStorage.removeItem('authToken');
+        return { valid: false };
       }
       
-      throw error;
+      const userData = await this.handleResponse(response, ' VERIFY TOKEN');
+      return { valid: true, user: userData.user || userData };
+      
+    } catch (error) {
+      console.log('⚠️ [API] Erro na verificação do token:', error);
+      localStorage.removeItem('authToken');
+      return { valid: false };
     }
   }
 
-  // TESTE BÁSICO DE CONECTIVIDADE
-  async testBasicConnectivity() {
+  async logout(): Promise<void> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const response = await fetch(`${this.baseURL}/users`, {
-        method: 'HEAD', // Apenas cabeçalhos, mais rápido
-        headers: this.getAuthHeaders(),
-        signal: controller.signal
+      await fetch(`${this.baseURL}/auth/logout`, {
+        method: 'POST',
+        headers: this.getAuthHeaders()
       });
-      
-      clearTimeout(timeout);
-      
-      if (response.status === 401) {
-        throw new Error('Token de autenticação inválido');
-      }
-      
-      if (response.status === 403) {
-        throw new Error('Sem permissão para acessar este recurso');
-      }
-      
-      return true;
-      
     } catch (error) {
-      if (error.name === 'AbortError') {
-        throw new Error('Timeout na conexão com o servidor');
-      }
-      throw error;
+      console.warn('⚠️ [API] Erro no logout do servidor (ignorando):', error);
+    } finally {
+      localStorage.removeItem('authToken');
     }
   }
 
-  // TESTE BÁSICO DE CONECTIVIDADE
-  async testBasicConnectivity() {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      
-      const response = await fetch(`${this.baseURL}/users`, {
-        method: 'HEAD', // Apenas cabeçalhos, mais rápido
-        headers: this.getAuthHeaders(),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeout);
-      
-      if (response.status === 401) {
-        throw new Error('Token de autenticação inválido');
-      }
-      
-      if (response.status === 403) {
-        throw new Error('Sem permissão para acessar este recurso');
-      }
-      
-      return true;
-      
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        throw new Error('Timeout na conexão com o servidor');
-      }
-      throw error;
-    }
+  async changePassword(data: { currentPassword: string; newPassword: string }): Promise<any> {
+    const response = await fetch(`${this.baseURL}/auth/change-password`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+    
+    return await this.handleResponse(response, ' CHANGE PASSWORD');
   }
 
-  // FUNÇÃO PARA OBTER USUÁRIOS COM RETRY
-  async getUsers(filters = {}) {
+  // USUÁRIOS
+  async getUsers(filters: Record<string, any> = {}): Promise<any[]> {
     console.log('🔄 [API] Carregando usuários:', filters);
     
     try {
@@ -323,7 +258,7 @@ class ApiService {
       // Adicionar filtros
       Object.entries(filters).forEach(([key, value]) => {
         if (value) {
-          url.searchParams.append(key, value);
+          url.searchParams.append(key, String(value));
         }
       });
       
@@ -340,32 +275,366 @@ class ApiService {
     }
   }
 
-  // VERIFICAÇÃO DE TOKEN MELHORADA
-  async verifyToken() {
+  async createUser(userData: Record<string, any>): Promise<any> {
+    console.log('📤 [API] Criando usuário:', { ...userData, password: '***' });
+    
     try {
-      const token = localStorage.getItem('authToken');
-      if (!token) {
-        console.log('⚠️ [API] Nenhum token para verificar');
-        return { valid: false };
+      // Validações do lado cliente
+      if (!userData.name?.trim()) {
+        throw new Error('Nome é obrigatório');
       }
       
-      const response = await fetch(`${this.baseURL}/auth/verify`, {
+      if (!userData.email?.trim()) {
+        throw new Error('Email é obrigatório');
+      }
+      
+      if (!userData.type) {
+        throw new Error('Tipo de usuário é obrigatório');
+      }
+      
+      const response = await fetch(`${this.baseURL}/users`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(userData)
+      });
+      
+      const result = await this.handleResponse(response, ' CREATE USER');
+      return result;
+      
+    } catch (error) {
+      console.error('❌ [API] Erro ao criar usuário:', error);
+      
+      if (error instanceof Error && (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED'))) {
+        throw new Error('Não foi possível conectar ao servidor. Verifique se o backend está rodando na porta 3001');
+      }
+      
+      throw error;
+    }
+  }
+
+  async updateUser(userId: string, userData: Record<string, any>): Promise<any> {
+    console.log('📝 [API] Atualizando usuário:', userId, userData);
+    
+    try {
+      if (!userId) {
+        throw new Error('ID do usuário é obrigatório');
+      }
+      
+      const response = await fetch(`${this.baseURL}/users/${userId}`, {
+        method: 'PUT',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(userData)
+      });
+      
+      return await this.handleResponse(response, ' UPDATE USER');
+      
+    } catch (error) {
+      console.error('❌ [API] Erro ao atualizar usuário:', error);
+      throw error;
+    }
+  }
+
+  async deleteUser(userId: string): Promise<any> {
+    console.log('🗑️ [API] Excluindo usuário:', userId);
+    
+    try {
+      if (!userId) {
+        throw new Error('ID do usuário é obrigatório');
+      }
+      
+      const response = await fetch(`${this.baseURL}/users/${userId}`, {
+        method: 'DELETE',
         headers: this.getAuthHeaders()
       });
       
-      if (!response.ok) {
-        console.log(`⚠️ [API] Token inválido: ${response.status}`);
-        localStorage.removeItem('authToken'); // Limpar token inválido
-        return { valid: false };
-      }
-      
-      const userData = await this.handleResponse(response, ' VERIFY TOKEN');
-      return { valid: true, user: userData.user || userData };
+      return await this.handleResponse(response, ' DELETE USER');
       
     } catch (error) {
-      console.log('⚠️ [API] Erro na verificação do token:', error);
-      localStorage.removeItem('authToken'); // Limpar token em caso de erro
-      return { valid: false };
+      console.error('❌ [API] Erro ao excluir usuário:', error);
+      
+      if (error instanceof Error && error.message.includes('Failed to fetch')) {
+        throw new Error('Não foi possível conectar ao servidor para excluir o usuário');
+      }
+      
+      throw error;
+    }
+  }
+
+  // PACIENTES
+  async getPatients(): Promise<any[]> {
+    try {
+      const response = await fetch(`${this.baseURL}/patients`, {
+        headers: this.getAuthHeaders()
+      });
+      
+      const patients = await this.handleResponse(response, ' GET PATIENTS');
+      return patients || [];
+    } catch (error) {
+      console.error('❌ [API] Erro ao carregar pacientes:', error);
+      throw error;
+    }
+  }
+
+  async getPatientsForSubstitution(): Promise<any[]> {
+    try {
+      const response = await fetch(`${this.baseURL}/patients?for_substitution=true`, {
+        headers: this.getAuthHeaders()
+      });
+      
+      const patients = await this.handleResponse(response, ' GET PATIENTS FOR SUBSTITUTION');
+      return patients || [];
+    } catch (error) {
+      console.error('❌ [API] Erro ao carregar pacientes para substituição:', error);
+      throw error;
+    }
+  }
+
+  async createPatient(patientData: Record<string, any>): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/patients`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(patientData)
+      });
+      
+      return await this.handleResponse(response, ' CREATE PATIENT');
+    } catch (error) {
+      console.error('❌ [API] Erro ao criar paciente:', error);
+      throw error;
+    }
+  }
+
+  async updatePatient(patientId: string, patientData: Record<string, any>): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/patients/${patientId}`, {
+        method: 'PUT',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(patientData)
+      });
+      
+      return await this.handleResponse(response, ' UPDATE PATIENT');
+    } catch (error) {
+      console.error('❌ [API] Erro ao atualizar paciente:', error);
+      throw error;
+    }
+  }
+
+  async deletePatient(patientId: string): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/patients/${patientId}`, {
+        method: 'DELETE',
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' DELETE PATIENT');
+    } catch (error) {
+      console.error('❌ [API] Erro ao excluir paciente:', error);
+      throw error;
+    }
+  }
+
+  // SESSÕES
+  async getSessions(filters: Record<string, any> = {}): Promise<any[]> {
+    try {
+      const url = new URL(`${this.baseURL}/sessions`);
+      
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value) {
+          url.searchParams.append(key, String(value));
+        }
+      });
+      
+      const response = await fetch(url.toString(), {
+        headers: this.getAuthHeaders()
+      });
+      
+      const sessions = await this.handleResponse(response, ' GET SESSIONS');
+      return sessions || [];
+    } catch (error) {
+      console.error('❌ [API] Erro ao carregar sessões:', error);
+      throw error;
+    }
+  }
+
+  async createSession(sessionData: Record<string, any>): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/sessions`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(sessionData)
+      });
+      
+      return await this.handleResponse(response, ' CREATE SESSION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao criar sessão:', error);
+      throw error;
+    }
+  }
+
+  async updateSession(sessionId: string, sessionData: Record<string, any>): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/sessions/${sessionId}`, {
+        method: 'PUT',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(sessionData)
+      });
+      
+      return await this.handleResponse(response, ' UPDATE SESSION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao atualizar sessão:', error);
+      throw error;
+    }
+  }
+
+  async deleteSession(sessionId: string): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' DELETE SESSION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao excluir sessão:', error);
+      throw error;
+    }
+  }
+
+  async confirmSession(sessionId: string): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/sessions/${sessionId}/confirm`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' CONFIRM SESSION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao confirmar sessão:', error);
+      throw error;
+    }
+  }
+
+  async approveSession(sessionId: string): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/sessions/${sessionId}/approve`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' APPROVE SESSION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao aprovar sessão:', error);
+      throw error;
+    }
+  }
+
+  async launchSession(sessionId: string): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/sessions/${sessionId}/launch`, {
+        method: 'PATCH',
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' LAUNCH SESSION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao lançar sessão:', error);
+      throw error;
+    }
+  }
+
+  // SUPERVISÕES
+  async getSupervisions(filters: Record<string, any> = {}): Promise<any[]> {
+    try {
+      const url = new URL(`${this.baseURL}/supervisions`);
+      
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value) {
+          url.searchParams.append(key, String(value));
+        }
+      });
+      
+      const response = await fetch(url.toString(), {
+        headers: this.getAuthHeaders()
+      });
+      
+      const supervisions = await this.handleResponse(response, ' GET SUPERVISIONS');
+      return supervisions || [];
+    } catch (error) {
+      console.error('❌ [API] Erro ao carregar supervisões:', error);
+      throw error;
+    }
+  }
+
+  async createSupervision(supervisionData: Record<string, any>): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/supervisions`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(supervisionData)
+      });
+      
+      return await this.handleResponse(response, ' CREATE SUPERVISION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao criar supervisão:', error);
+      throw error;
+    }
+  }
+
+  async deleteSupervision(supervisionId: string): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/supervisions/${supervisionId}`, {
+        method: 'DELETE',
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' DELETE SUPERVISION');
+    } catch (error) {
+      console.error('❌ [API] Erro ao excluir supervisão:', error);
+      throw error;
+    }
+  }
+
+  // CONFIGURAÇÕES DE SUPERVISÃO
+  async getSupervisionRates(): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/settings/supervision-rates`, {
+        headers: this.getAuthHeaders()
+      });
+      
+      return await this.handleResponse(response, ' GET SUPERVISION RATES');
+    } catch (error) {
+      console.error('❌ [API] Erro ao carregar taxas de supervisão:', error);
+      throw error;
+    }
+  }
+
+  async saveSupervisionRates(rates: Record<string, number>): Promise<any> {
+    try {
+      const response = await fetch(`${this.baseURL}/settings/supervision-rates`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(rates)
+      });
+      
+      return await this.handleResponse(response, ' SAVE SUPERVISION RATES');
+    } catch (error) {
+      console.error('❌ [API] Erro ao salvar taxas de supervisão:', error);
+      throw error;
+    }
+  }
+
+  // AUXILIARES
+  async getATs(): Promise<any[]> {
+    try {
+      const response = await fetch(`${this.baseURL}/users?type=at`, {
+        headers: this.getAuthHeaders()
+      });
+      
+      const ats = await this.handleResponse(response, ' GET ATS');
+      return ats || [];
+    } catch (error) {
+      console.error('❌ [API] Erro ao carregar ATs:', error);
+      throw error;
     }
   }
 }
