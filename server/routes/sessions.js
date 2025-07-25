@@ -1,4 +1,4 @@
-// ✅ ARQUIVO SESSIONS.JS CORRIGIDO - ROTAS PARA ATENDIMENTOS
+// ✅ ARQUIVO SESSIONS.JS COMPLETO E CORRIGIDO - ROTAS PARA ATENDIMENTOS
 import express from 'express';
 import supabase from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
@@ -247,17 +247,29 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ CONFIRMAR SESSÃO (RECEPÇÃO)
+// ✅ CONFIRMAR SESSÃO (RECEPÇÃO) - FUNÇÃO PRINCIPAL CORRIGIDA
 router.patch('/:id/confirm', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('✅ [SESSIONS] Confirmando sessão:', id, 'por', req.user.type);
+    console.log('✅ [SESSIONS] Confirmando sessão:', id, 'por usuário:', req.user.name, 'tipo:', req.user.type);
 
-    // ✅ VERIFICAR PERMISSÃO (apenas admins podem confirmar)
-    if (!req.user.type.startsWith('adm-')) {
-      return res.status(403).json({ message: 'Apenas administradores podem confirmar atendimentos' });
+    // ✅ CORREÇÃO PRINCIPAL: Verificar permissão melhorada
+    const canConfirm = req.user.type === 'adm-geral' || 
+                      req.user.type.startsWith('adm-') ||
+                      req.user.type.startsWith('coordenacao-') ||
+                      req.user.type.startsWith('financeiro-');
+
+    if (!canConfirm) {
+      console.log('❌ [SESSIONS] Acesso negado para tipo:', req.user.type);
+      return res.status(403).json({ 
+        message: 'Apenas administradores podem confirmar atendimentos',
+        userType: req.user.type,
+        allowedTypes: ['adm-geral', 'adm-*', 'coordenacao-*', 'financeiro-*']
+      });
     }
+
+    console.log('✅ [SESSIONS] Permissão confirmada para:', req.user.type);
 
     // ✅ VERIFICAR SE SESSÃO EXISTE
     const { data: session, error: sessionError } = await supabase
@@ -272,8 +284,16 @@ router.patch('/:id/confirm', authenticateToken, async (req, res) => {
     }
 
     if (session.is_confirmed) {
+      console.log('⚠️ [SESSIONS] Sessão já confirmada:', id);
       return res.status(400).json({ message: 'Atendimento já foi confirmado' });
     }
+
+    console.log('🔍 [SESSIONS] Sessão encontrada, confirmando...', {
+      id: session.id,
+      patient_id: session.patient_id,
+      at_id: session.at_id,
+      date: session.date
+    });
 
     // ✅ CONFIRMAR SESSÃO
     const { data: confirmedSession, error: confirmError } = await supabase
@@ -289,32 +309,75 @@ router.patch('/:id/confirm', authenticateToken, async (req, res) => {
 
     if (confirmError) {
       console.error('❌ [SESSIONS] Erro ao confirmar sessão:', confirmError);
-      return res.status(500).json({ message: 'Erro ao confirmar atendimento' });
+      return res.status(500).json({ 
+        message: 'Erro ao confirmar atendimento',
+        error: confirmError.message 
+      });
     }
 
-    console.log('✅ [SESSIONS] Sessão confirmada com sucesso');
+    console.log('✅ [SESSIONS] Sessão confirmada com sucesso por:', req.user.name, req.user.type);
+    
     res.json({ 
       message: 'Atendimento confirmado com sucesso',
-      session: confirmedSession
+      session: confirmedSession,
+      confirmedBy: {
+        id: req.user.id,
+        name: req.user.name,
+        type: req.user.type
+      }
     });
 
   } catch (error) {
-    console.error('❌ [SESSIONS] Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno ao confirmar atendimento' });
+    console.error('❌ [SESSIONS] Erro interno na confirmação:', error);
+    res.status(500).json({ 
+      message: 'Erro interno ao confirmar atendimento',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    });
   }
 });
 
-// ✅ APROVAR SESSÃO
+// ✅ APROVAR SESSÃO - FUNÇÃO CORRIGIDA
 router.patch('/:id/approve', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar permissão
-    if (!req.user.type.startsWith('adm-') && !req.user.type.startsWith('coordenacao-')) {
-      return res.status(403).json({ message: 'Sem permissão para aprovar atendimentos' });
+    console.log('✅ [SESSIONS] Aprovando sessão:', id, 'por usuário:', req.user.name, 'tipo:', req.user.type);
+
+    // ✅ CORREÇÃO: Verificar permissão melhorada para aprovação
+    const canApprove = req.user.type === 'adm-geral' || 
+                      req.user.type.startsWith('adm-') ||
+                      req.user.type.startsWith('coordenacao-');
+
+    if (!canApprove) {
+      console.log('❌ [SESSIONS] Acesso negado para aprovação, tipo:', req.user.type);
+      return res.status(403).json({ 
+        message: 'Sem permissão para aprovar atendimentos',
+        userType: req.user.type 
+      });
     }
 
-    const { data: approvedSession, error } = await supabase
+    // Verificar se a sessão existe e está confirmada
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({ message: 'Atendimento não encontrado' });
+    }
+
+    if (!session.is_confirmed) {
+      return res.status(400).json({ 
+        message: 'Atendimento deve estar confirmado antes de ser aprovado' 
+      });
+    }
+
+    if (session.is_approved) {
+      return res.status(400).json({ message: 'Atendimento já foi aprovado' });
+    }
+
+    const { data: approvedSession, error: approveError } = await supabase
       .from('sessions')
       .update({
         is_approved: true,
@@ -322,37 +385,68 @@ router.patch('/:id/approve', authenticateToken, async (req, res) => {
         approved_by: req.user.id
       })
       .eq('id', id)
-      .eq('is_confirmed', true) // Só pode aprovar se já estiver confirmado
       .select()
       .single();
 
-    if (error) {
-      console.error('❌ [SESSIONS] Erro ao aprovar sessão:', error);
+    if (approveError) {
+      console.error('❌ [SESSIONS] Erro ao aprovar sessão:', approveError);
       return res.status(500).json({ message: 'Erro ao aprovar atendimento' });
     }
 
+    console.log('✅ [SESSIONS] Sessão aprovada com sucesso');
     res.json({ 
       message: 'Atendimento aprovado com sucesso',
       session: approvedSession
     });
 
   } catch (error) {
-    console.error('❌ [SESSIONS] Erro interno:', error);
+    console.error('❌ [SESSIONS] Erro interno na aprovação:', error);
     res.status(500).json({ message: 'Erro interno ao aprovar atendimento' });
   }
 });
 
-// ✅ LANÇAR SESSÃO (FINANCEIRO)
+// ✅ LANÇAR SESSÃO (FINANCEIRO) - FUNÇÃO CORRIGIDA
 router.patch('/:id/launch', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar permissão
-    if (!req.user.type.startsWith('financeiro-') && !req.user.type.startsWith('adm-')) {
-      return res.status(403).json({ message: 'Sem permissão para lançar atendimentos' });
+    console.log('✅ [SESSIONS] Lançando sessão:', id, 'por usuário:', req.user.name, 'tipo:', req.user.type);
+
+    // ✅ CORREÇÃO: Verificar permissão para lançamento
+    const canLaunch = req.user.type === 'adm-geral' || 
+                     req.user.type.startsWith('financeiro-') ||
+                     req.user.type.startsWith('adm-');
+
+    if (!canLaunch) {
+      console.log('❌ [SESSIONS] Acesso negado para lançamento, tipo:', req.user.type);
+      return res.status(403).json({ 
+        message: 'Sem permissão para lançar atendimentos',
+        userType: req.user.type 
+      });
     }
 
-    const { data: launchedSession, error } = await supabase
+    // Verificar se a sessão existe e está aprovada
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({ message: 'Atendimento não encontrado' });
+    }
+
+    if (!session.is_approved) {
+      return res.status(400).json({ 
+        message: 'Atendimento deve estar aprovado antes de ser lançado' 
+      });
+    }
+
+    if (session.is_launched) {
+      return res.status(400).json({ message: 'Atendimento já foi lançado' });
+    }
+
+    const { data: launchedSession, error: launchError } = await supabase
       .from('sessions')
       .update({
         is_launched: true,
@@ -360,22 +454,22 @@ router.patch('/:id/launch', authenticateToken, async (req, res) => {
         launched_by: req.user.id
       })
       .eq('id', id)
-      .eq('is_approved', true) // Só pode lançar se já estiver aprovado
       .select()
       .single();
 
-    if (error) {
-      console.error('❌ [SESSIONS] Erro ao lançar sessão:', error);
+    if (launchError) {
+      console.error('❌ [SESSIONS] Erro ao lançar sessão:', launchError);
       return res.status(500).json({ message: 'Erro ao lançar atendimento' });
     }
 
+    console.log('✅ [SESSIONS] Sessão lançada com sucesso');
     res.json({ 
       message: 'Atendimento lançado com sucesso',
       session: launchedSession
     });
 
   } catch (error) {
-    console.error('❌ [SESSIONS] Erro interno:', error);
+    console.error('❌ [SESSIONS] Erro interno no lançamento:', error);
     res.status(500).json({ message: 'Erro interno ao lançar atendimento' });
   }
 });
