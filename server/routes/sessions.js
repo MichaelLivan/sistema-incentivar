@@ -1,503 +1,422 @@
-// CORRIGIDO: Cadastro de paciente permitindo admin setorial e melhorando validações
+// ✅ ARQUIVO SUPERVISIONS.JS CORRIGIDO E MELHORADO
 import express from 'express';
 import supabase from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Listar pacientes
+// ✅ LISTAR SUPERVISÕES
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { sector, for_substitution } = req.query;
-
+    const { month, year, at_id } = req.query;
+    
+    console.log('🔍 [SUPERVISIONS] Carregando supervisões para usuário:', req.user.type);
+    
     let query = supabase
-      .from('patients')
+      .from('supervisions')
       .select(`
         *,
-        parent:users!patients_parent_id_fkey(name, email),
-        at:users!patients_at_id_fkey(name, email)
+        at:users!supervisions_at_id_fkey(id, name, sector),
+        coordinator:users!supervisions_coordinator_id_fkey(id, name, sector)
       `)
-      .eq('active', true)
-      .order('name');
+      .order('date', { ascending: false })
+      .order('start_time', { ascending: false });
 
-    if (req.user.type === 'pais') {
-      const { data: parentUser, error: parentError } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', req.user.id)
-        .single();
-
-      if (parentError) {
-        return res.status(500).json({ message: 'Erro ao buscar dados do responsável' });
-      }
-
-      const { data: allPatients, error: patientsError } = await supabase
-        .from('patients')
-        .select(`
-          *,
-          parent:users!patients_parent_id_fkey(name, email),
-          at:users!patients_at_id_fkey(name, email)
-        `)
-        .eq('active', true)
-        .order('name');
-
-      if (patientsError) {
-        return res.status(500).json({ message: 'Erro ao buscar pacientes' });
-      }
-
-      const myPatients = allPatients.filter(patient => {
-        const isMainParent = patient.parent?.email === parentUser.email;
-        const isSecondParent = patient.parent_email2 === parentUser.email;
-        return isMainParent || isSecondParent;
-      });
-
-      return res.json(myPatients);
-    }
-
-    // ✅ CORREÇÃO: Permitir ATs verem todos os pacientes do setor para substituição
-    if (req.user.type.startsWith('at-')) {
-      if (for_substitution === 'true') {
-        query = query.eq('sector', req.user.sector);
-      } else {
-        query = query.eq('at_id', req.user.id);
-      }
+    // ✅ FILTROS POR TIPO DE USUÁRIO
+    if (req.user.type.startsWith('coordenacao-')) {
+      // Coordenadores veem supervisões que criaram
+      query = query.eq('coordinator_id', req.user.id);
+    } else if (req.user.type.startsWith('at-')) {
+      // ATs veem suas próprias supervisões
+      query = query.eq('at_id', req.user.id);
     } else if (req.user.sector && req.user.type !== 'adm-geral') {
+      // Usuários setoriais veem supervisões do seu setor
       query = query.eq('sector', req.user.sector);
     }
+    // Admin geral vê todas
 
-    if (sector) {
-      query = query.eq('sector', sector);
+    // ✅ FILTROS ADICIONAIS
+    if (at_id) {
+      query = query.eq('at_id', at_id);
     }
 
-    const { data: patients, error } = await query;
+    if (month && year) {
+      const startDate = `${year}-${month.padStart(2, '0')}-01`;
+      const endDate = `${year}-${month.padStart(2, '0')}-31`;
+      query = query.gte('date', startDate).lte('date', endDate);
+    }
+
+    const { data: supervisions, error } = await query;
 
     if (error) {
-      console.error('❌ Erro ao buscar pacientes:', error);
-      return res.status(500).json({ message: 'Erro ao buscar pacientes' });
+      console.error('❌ [SUPERVISIONS] Erro ao buscar supervisões:', error);
+      return res.status(500).json({ message: 'Erro ao buscar supervisões' });
     }
 
-    console.log('📊 Busca de pacientes:', {
-      usuario: req.user.type,
-      setor: req.user.sector,
-      for_substitution,
-      pacientes_encontrados: patients.length
-    });
-    
-    res.json(patients);
+    console.log(`✅ [SUPERVISIONS] ${supervisions?.length || 0} supervisões encontradas`);
+    res.json(supervisions || []);
+
   } catch (error) {
-    console.error('❌ Erro interno ao buscar pacientes:', error);
-    res.status(500).json({ message: 'Erro interno ao buscar pacientes' });
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao buscar supervisões' });
   }
 });
 
-// ✅ CRIAR PACIENTE - CORRIGIDO PARA ADMIN SETORIAL
+// ✅ CRIAR SUPERVISÃO
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    console.log('📤 [CREATE PATIENT] Iniciando cadastro de paciente');
-    console.log('👤 [CREATE PATIENT] Usuário:', req.user.type, req.user.sector);
-    console.log('📋 [CREATE PATIENT] Dados recebidos:', req.body);
+    const { at_id, start_time, end_time, date, observations } = req.body;
 
-    // ✅ VERIFICAÇÃO DE PERMISSÃO CORRIGIDA
-    const allowedTypes = [
-      'adm-geral',
-      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
-    ];
-
-    if (!allowedTypes.includes(req.user.type)) {
-      console.error('❌ [CREATE PATIENT] Usuário não autorizado:', req.user.type);
-      return res.status(403).json({ 
-        message: 'Apenas administradores podem cadastrar pacientes',
-        userType: req.user.type 
-      });
-    }
-
-    const {
-      name,
-      parent_email,
-      parent_name,
-      parent_email2,
-      parent_name2,
+    console.log('📤 [SUPERVISIONS] Criando supervisão:', {
       at_id,
-      sector,
-      weekly_hours,
-      hourly_rate
-    } = req.body;
+      start_time,
+      end_time,
+      date,
+      user: req.user.type,
+      sector: req.user.sector
+    });
 
-    // ✅ VALIDAÇÕES BÁSICAS MELHORADAS
-    if (!name?.trim()) {
-      return res.status(400).json({ message: 'Nome do paciente é obrigatório' });
+    // ✅ VALIDAÇÕES
+    if (!at_id || !start_time || !end_time || !date) {
+      return res.status(400).json({ message: 'Todos os campos obrigatórios devem ser preenchidos' });
     }
 
-    if (!parent_email?.trim()) {
-      return res.status(400).json({ message: 'Email do responsável é obrigatório' });
+    // ✅ VERIFICAR PERMISSÕES
+    // ATs podem criar supervisões para si mesmos
+    // Coordenadores podem criar supervisões para qualquer AT
+    // Admins podem criar supervisões
+    if (!req.user.type.startsWith('coordenacao-') && 
+        !req.user.type.startsWith('adm-') && 
+        !req.user.type.startsWith('at-')) {
+      return res.status(403).json({ message: 'Você não tem permissão para criar supervisões' });
     }
 
-    if (!parent_name?.trim()) {
-      return res.status(400).json({ message: 'Nome do responsável é obrigatório' });
+    // ✅ SE FOR UM AT, SÓ PODE CRIAR SUPERVISÃO PARA SI MESMO
+    if (req.user.type.startsWith('at-') && at_id !== req.user.id) {
+      return res.status(403).json({ message: 'ATs só podem criar supervisões para si mesmos' });
     }
 
-    if (!sector) {
-      return res.status(400).json({ message: 'Setor é obrigatório' });
-    }
-
-    // ✅ VALIDAÇÃO DE EMAIL MELHORADA
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(parent_email.trim())) {
-      return res.status(400).json({ message: 'Formato de e-mail do responsável inválido' });
-    }
-
-    if (parent_email2 && !emailRegex.test(parent_email2.trim())) {
-      return res.status(400).json({ message: 'Formato de e-mail do segundo responsável inválido' });
-    }
-
-    // ✅ VERIFICAR SE PACIENTE JÁ EXISTE
-    console.log('🔍 [CREATE PATIENT] Verificando se paciente já existe...');
-    const { data: existingPatient } = await supabase
-      .from('patients')
-      .select('id, name')
-      .eq('name', name.trim())
-      .eq('parent_email', parent_email.trim().toLowerCase())
-      .maybeSingle();
-
-    if (existingPatient) {
-      return res.status(409).json({ 
-        message: 'Já existe um paciente com este nome e e-mail de responsável' 
-      });
-    }
-
-    // ✅ CRIAR USUÁRIO "PAIS" AUTOMATICAMENTE - PRIMEIRA PARTE
-    console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 1:', parent_email);
-    
-    const { data: existingParent1 } = await supabase
+    // ✅ VERIFICAR SE O AT EXISTE
+    const { data: atUser, error: atError } = await supabase
       .from('users')
+      .select('id, name, sector, type')
+      .eq('id', at_id)
+      .single();
+
+    if (atError || !atUser) {
+      return res.status(404).json({ message: 'AT não encontrado' });
+    }
+
+    if (!atUser.type.startsWith('at-')) {
+      return res.status(400).json({ message: 'Usuário selecionado não é um AT' });
+    }
+
+    // ✅ CALCULAR HORAS
+    const calculateHours = (start, end) => {
+      const [startHour, startMin] = start.split(':').map(Number);
+      const [endHour, endMin] = end.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const endMinutes = endHour * 60 + endMin;
+      const diffMinutes = endMinutes - startMinutes;
+      return Math.round((Math.max(0, diffMinutes) / 60) * 2) / 2; // Arredondar para 0.5
+    };
+
+    const hours = calculateHours(start_time, end_time);
+
+    if (hours <= 0) {
+      return res.status(400).json({ message: 'Horário de fim deve ser posterior ao horário de início' });
+    }
+
+    // ✅ VERIFICAR DUPLICATAS
+    const { data: existingSupervision } = await supabase
+      .from('supervisions')
       .select('id')
-      .eq('email', parent_email.trim().toLowerCase())
-      .eq('type', 'pais')
+      .eq('at_id', at_id)
+      .eq('date', date)
+      .eq('start_time', start_time)
+      .eq('end_time', end_time)
       .maybeSingle();
 
-    let parentId = existingParent1 ? existingParent1.id : null;
-
-    if (!existingParent1) {
-      console.log('➕ [CREATE PATIENT] Criando novo usuário "pais" para:', parent_email);
-      
-      // ✅ IMPORTAÇÃO DINÂMICA DO BCRYPT CORRIGIDA
-      const bcrypt = await import('bcryptjs');
-      const defaultPassword = await bcrypt.default.hash('123456', 12);
-      
-      const { data: newParentUser, error: createParentError } = await supabase
-        .from('users')
-        .insert({
-          name: parent_name.trim(),
-          email: parent_email.trim().toLowerCase(),
-          type: 'pais',
-          password: defaultPassword,
-          active: true,
-          created_at: new Date().toISOString()
-        })
-        .select('id')
-        .single();
-
-      if (createParentError) {
-        console.error('❌ [CREATE PATIENT] Erro ao criar usuário responsável:', createParentError);
-        return res.status(500).json({ 
-          message: 'Erro ao criar usuário para o responsável',
-          error: createParentError.message 
-        });
-      }
-
-      parentId = newParentUser.id;
-      console.log('✅ [CREATE PATIENT] Usuário "pais" criado com sucesso:', newParentUser.id);
+    if (existingSupervision) {
+      return res.status(409).json({ message: 'Já existe uma supervisão idêntica registrada' });
     }
 
-    // ✅ CRIAR USUÁRIO "PAIS" PARA SEGUNDO RESPONSÁVEL (SE FORNECIDO)
-    if (parent_email2?.trim()) {
-      console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 2:', parent_email2);
-      
-      const { data: existingParent2 } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', parent_email2.trim().toLowerCase())
-        .eq('type', 'pais')
-        .maybeSingle();
-
-      if (!existingParent2) {
-        if (!parent_name2?.trim()) {
-          return res.status(400).json({ 
-            message: 'Nome do 2º responsável é obrigatório para novo e-mail' 
-          });
-        }
-
-        console.log('➕ [CREATE PATIENT] Criando novo usuário "pais" para responsável 2:', parent_email2);
-        
-        const bcrypt = await import('bcryptjs');
-        const defaultPassword = await bcrypt.default.hash('123456', 12);
-        
-        const { data: newParentUser2, error: createParent2Error } = await supabase
-          .from('users')
-          .insert({
-            name: parent_name2.trim(),
-            email: parent_email2.trim().toLowerCase(),
-            type: 'pais',
-            password: defaultPassword,
-            active: true,
-            created_at: new Date().toISOString()
-          })
-          .select('id')
-          .single();
-
-        if (createParent2Error) {
-          console.error('❌ [CREATE PATIENT] Erro ao criar usuário responsável 2:', createParent2Error);
-          return res.status(500).json({ 
-            message: 'Erro ao criar usuário para o segundo responsável',
-            error: createParent2Error.message 
-          });
-        }
-
-        console.log('✅ [CREATE PATIENT] Usuário "pais" 2 criado com sucesso:', newParentUser2.id);
-      }
+    // ✅ DETERMINAR COORDINATOR_ID E SECTOR
+    let coordinatorId;
+    let sector;
+    
+    if (req.user.type.startsWith('at-')) {
+      // AT criando supervisão para si mesmo
+      coordinatorId = req.user.id;
+      sector = req.user.sector;
+    } else if (req.user.type.startsWith('coordenacao-')) {
+      // Coordenador criando supervisão
+      coordinatorId = req.user.id;
+      sector = req.user.sector;
+    } else {
+      // Admin criando supervisão
+      coordinatorId = req.user.id;
+      sector = atUser.sector; // Usar setor do AT
     }
 
-    // ✅ PREPARAR DADOS DO PACIENTE
-    const patientData = {
-      name: name.trim(),
-      parent_id: parentId,
-      parent_email: parent_email.trim().toLowerCase(),
-      parent_name: parent_name.trim(),
+    // ✅ INSERIR SUPERVISÃO
+    const supervisionData = {
+      at_id,
+      coordinator_id: coordinatorId,
+      start_time,
+      end_time,
+      date,
+      hours,
       sector: sector,
-      weekly_hours: weekly_hours ? Number(weekly_hours) : null,
-      hourly_rate: hourly_rate ? Number(hourly_rate) : null,
-      at_id: at_id || null,
-      active: true,
-      parent_email2: parent_email2?.trim().toLowerCase() || null,
-      parent_name2: parent_name2?.trim() || null,
+      observations: observations || '',
       created_at: new Date().toISOString()
     };
 
-    console.log('💾 [CREATE PATIENT] Inserindo paciente no banco:', patientData);
-
-    // ✅ INSERIR PACIENTE NO BANCO
-    const { data: insertedPatients, error: insertError } = await supabase
-      .from('patients')
-      .insert(patientData)
-      .select();
-
-    if (insertError) {
-      console.error('❌ [CREATE PATIENT] Erro ao inserir paciente:', insertError);
-      return res.status(500).json({
-        message: 'Erro ao cadastrar paciente no banco de dados',
-        error: insertError.message
-      });
-    }
-
-    if (!insertedPatients || insertedPatients.length === 0) {
-      console.error('❌ [CREATE PATIENT] Paciente não retornado após inserção');
-      return res.status(500).json({
-        message: 'Paciente não foi retornado após cadastro'
-      });
-    }
-
-    const newPatient = insertedPatients[0];
-    console.log('✅ [CREATE PATIENT] Paciente inserido com sucesso:', newPatient.id);
-
-    // ✅ BUSCAR DADOS COMPLETOS DO PACIENTE
-    const { data: completePatient, error: fetchError } = await supabase
-      .from('patients')
+    const { data: newSupervision, error: insertError } = await supabase
+      .from('supervisions')
+      .insert(supervisionData)
       .select(`
         *,
-        parent:users!patients_parent_id_fkey(name, email),
-        at:users!patients_at_id_fkey(name, email)
+        at:users!supervisions_at_id_fkey(name, sector),
+        coordinator:users!supervisions_coordinator_id_fkey(name, sector)
       `)
-      .eq('id', newPatient.id)
       .single();
 
-    if (fetchError) {
-      console.warn('⚠️ [CREATE PATIENT] Erro ao buscar dados completos:', fetchError);
-    }
-
-    // ✅ MENSAGEM DE SUCESSO MELHORADA
-    let successMessage = '✅ Paciente cadastrado com sucesso!';
-    const createdUsers = [];
-    
-    if (!existingParent1) {
-      createdUsers.push(`${parent_name} (${parent_email})`);
-    }
-    
-    if (parent_email2 && !existingParent2) {
-      createdUsers.push(`${parent_name2} (${parent_email2})`);
-    }
-    
-    if (createdUsers.length > 0) {
-      successMessage += `\n\n👥 Usuários "pais" criados automaticamente:\n• ${createdUsers.join('\n• ')}\n\n🔑 Senha padrão: 123456\n(Os pais podem alterar a senha após o primeiro login)`;
-    }
-
-    console.log('🎉 [CREATE PATIENT] Cadastro concluído com sucesso!');
-
-    res.status(201).json({
-      success: true,
-      message: successMessage,
-      patient: completePatient || newPatient,
-      createdUsers: createdUsers.length
-    });
-
-  } catch (error) {
-    console.error('❌ [CREATE PATIENT] Erro interno:', error);
-    res.status(500).json({
-      message: 'Erro interno do servidor ao cadastrar paciente',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
-    });
-  }
-});
-
-// Atualizar paciente
-router.put('/:id', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const {
-      name,
-      parent_email,
-      parent_name,
-      parent_email2,
-      parent_name2,
-      at_id,
-      sector,
-      weekly_hours,
-      hourly_rate
-    } = req.body;
-
-    // ✅ VERIFICAÇÃO DE PERMISSÃO
-    const allowedTypes = [
-      'adm-geral',
-      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
-    ];
-
-    if (!allowedTypes.includes(req.user.type)) {
-      return res.status(403).json({ 
-        message: 'Apenas administradores podem atualizar pacientes' 
+    if (insertError) {
+      console.error('❌ [SUPERVISIONS] Erro ao inserir supervisão:', insertError);
+      return res.status(500).json({ 
+        message: 'Erro ao criar supervisão', 
+        error: insertError.message,
+        details: insertError.details || 'Detalhes não disponíveis'
       });
     }
 
-    const { data: updatedPatient, error } = await supabase
-      .from('patients')
-      .update({
-        name,
-        parent_email,
-        parent_name,
-        parent_email2,
-        parent_name2,
-        at_id,
-        sector,
-        weekly_hours: weekly_hours ? Number(weekly_hours) : null,
-        hourly_rate: hourly_rate ? Number(hourly_rate) : null,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('❌ Erro ao atualizar paciente:', error);
-      return res.status(500).json({ message: 'Erro ao atualizar paciente' });
-    }
-
-    res.status(200).json({
-      message: 'Paciente atualizado com sucesso',
-      patient: updatedPatient
+    console.log('✅ [SUPERVISIONS] Supervisão criada com sucesso:', {
+      id: newSupervision.id,
+      at_id: newSupervision.at_id,
+      coordinator_id: newSupervision.coordinator_id,
+      hours: newSupervision.hours,
+      sector: newSupervision.sector,
+      created_by: req.user.name
     });
+
+    res.status(201).json({
+      message: 'Supervisão criada com sucesso',
+      supervisionId: newSupervision.id,
+      supervision: newSupervision
+    });
+
   } catch (error) {
-    console.error('❌ Erro interno ao atualizar paciente:', error);
-    res.status(500).json({
-      message: 'Erro interno ao atualizar paciente',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    console.error('❌ [SUPERVISIONS] Erro interno ao criar supervisão:', error);
+    res.status(500).json({ 
+      message: 'Erro interno ao criar supervisão',
+      error: error.message
     });
   }
 });
 
-// Excluir paciente - HARD DELETE COMPLETO
+// ✅ EXCLUIR SUPERVISÃO
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // ✅ VERIFICAÇÃO DE PERMISSÃO
-    const allowedTypes = [
-      'adm-geral',
-      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
-    ];
+    console.log('🗑️ [SUPERVISIONS] Excluindo supervisão:', id);
 
-    if (!allowedTypes.includes(req.user.type)) {
-      return res.status(403).json({ 
-        message: 'Apenas administradores podem excluir pacientes' 
-      });
-    }
-
-    console.log('🗑️ Iniciando exclusão completa do paciente:', id);
-
-    // 1. Verificar se o paciente existe e obter dados
-    const { data: existingPatient, error: fetchError } = await supabase
-      .from('patients')
-      .select('id, name, parent_email, parent_email2, at_id')
+    // ✅ VERIFICAR SE SUPERVISÃO EXISTE
+    const { data: supervision, error: supervisionError } = await supabase
+      .from('supervisions')
+      .select('*')
       .eq('id', id)
       .single();
 
-    if (fetchError || !existingPatient) {
-      console.error('❌ Paciente não encontrado:', fetchError);
-      return res.status(404).json({ message: 'Paciente não encontrado' });
+    if (supervisionError || !supervision) {
+      console.error('❌ [SUPERVISIONS] Supervisão não encontrada:', supervisionError);
+      return res.status(404).json({ message: 'Supervisão não encontrada' });
     }
 
-    console.log('🔍 Paciente encontrado:', existingPatient.name);
+    console.log('🔍 [SUPERVISIONS] Supervisão encontrada:', {
+      id: supervision.id,
+      date: supervision.date,
+      hours: supervision.hours,
+      at_id: supervision.at_id,
+      coordinator_id: supervision.coordinator_id
+    });
 
-    // 2. DELETAR TODAS AS SESSÕES DO PACIENTE
-    console.log('🗑️ Deletando todas as sessões do paciente...');
-    const { data: deletedSessions, error: sessionsError } = await supabase
-      .from('sessions')
-      .delete()
-      .eq('patient_id', id)
-      .select('id');
+    // ✅ VERIFICAR PERMISSÃO
+    const canDelete = req.user.type.startsWith('adm-') || 
+                     req.user.type.startsWith('financeiro-') ||
+                     supervision.coordinator_id === req.user.id ||
+                     (req.user.type.startsWith('at-') && supervision.at_id === req.user.id);
 
-    if (sessionsError) {
-      console.error('❌ Erro ao deletar sessões:', sessionsError);
-      return res.status(500).json({ 
-        message: 'Erro ao deletar sessões do paciente', 
-        error: sessionsError.message 
-      });
+    if (!canDelete) {
+      return res.status(403).json({ message: 'Você não tem permissão para excluir esta supervisão' });
     }
 
-    console.log(`✅ ${deletedSessions?.length || 0} sessões deletadas`);
-
-    // 3. VERIFICAR E DELETAR PAIS SE NÃO ESTIVEREM VINCULADOS A OUTROS PACIENTES
-    // ... [resto da lógica de exclusão de pais]
-
-    // 4. DELETAR O PACIENTE
-    console.log('🗑️ Deletando o paciente...');
-    const { error: deletePatientError } = await supabase
-      .from('patients')
+    // ✅ EXCLUIR SUPERVISÃO (HARD DELETE)
+    const { error: deleteError } = await supabase
+      .from('supervisions')
       .delete()
       .eq('id', id);
 
-    if (deletePatientError) {
-      console.error('❌ Erro ao deletar paciente:', deletePatientError);
+    if (deleteError) {
+      console.error('❌ [SUPERVISIONS] Erro ao deletar supervisão:', deleteError);
       return res.status(500).json({ 
-        message: 'Erro ao deletar paciente', 
-        error: deletePatientError.message 
+        message: 'Erro ao excluir supervisão', 
+        error: deleteError.message 
       });
     }
 
-    console.log('✅ Paciente deletado permanentemente');
-
-    res.status(200).json({
-      success: true,
-      message: 'Paciente e todos os dados relacionados foram deletados com sucesso',
-      deletedData: {
-        patient: existingPatient.name,
-        sessionsDeleted: deletedSessions?.length || 0
+    console.log('✅ [SUPERVISIONS] Supervisão excluída permanentemente');
+    res.json({ 
+      message: 'Supervisão excluída com sucesso',
+      deletedSupervision: {
+        id: supervision.id,
+        date: supervision.date,
+        hours: supervision.hours
       }
     });
 
   } catch (error) {
-    console.error('❌ Erro interno ao excluir paciente:', error);
-    res.status(500).json({
-      message: 'Erro interno ao excluir paciente completamente',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao excluir supervisão' });
+  }
+});
+
+// ✅ BUSCAR TAXAS DE SUPERVISÃO
+router.get('/rates', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔍 [SUPERVISIONS] Carregando taxas de supervisão para:', req.user.type);
+    
+    // Apenas financeiro-ats pode acessar taxas de supervisão
+    if (req.user.type !== 'financeiro-ats') {
+      return res.status(403).json({ message: 'Acesso negado. Apenas financeiro-ats pode acessar taxas de supervisão.' });
+    }
+
+    const { data: rates, error } = await supabase
+      .from('supervision_rates')
+      .select('*')
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = not found
+      console.error('❌ [SUPERVISIONS] Erro ao buscar taxas:', error);
+      return res.status(500).json({ message: 'Erro ao buscar taxas de supervisão' });
+    }
+
+    // Se não há taxas, retornar valores padrão
+    if (!rates) {
+      console.log('📋 [SUPERVISIONS] Nenhuma taxa encontrada, retornando valores padrão');
+      const defaultRates = {
+        aba: 35,
+        denver: 35,
+        grupo: 35,
+        escolar: 35
+      };
+      return res.json(defaultRates);
+    }
+
+    const responseRates = {
+      aba: rates.aba || 35,
+      denver: rates.denver || 35,
+      grupo: rates.grupo || 35,
+      escolar: rates.escolar || 35
+    };
+
+    console.log('✅ [SUPERVISIONS] Taxas de supervisão carregadas:', responseRates);
+    res.json(responseRates);
+
+  } catch (error) {
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao buscar taxas' });
+  }
+});
+
+// ✅ SALVAR TAXAS DE SUPERVISÃO
+router.post('/rates', authenticateToken, async (req, res) => {
+  try {
+    const { aba, denver, grupo, escolar } = req.body;
+
+    console.log('💾 [SUPERVISIONS] Salvando taxas de supervisão:', { aba, denver, grupo, escolar });
+    console.log('👤 [SUPERVISIONS] Usuário:', req.user.type);
+
+    // Apenas financeiro-ats pode salvar taxas de supervisão
+    if (req.user.type !== 'financeiro-ats') {
+      console.log('❌ [SUPERVISIONS] Acesso negado para tipo de usuário:', req.user.type);
+      return res.status(403).json({ message: 'Acesso negado. Apenas financeiro-ats pode salvar taxas de supervisão.' });
+    }
+
+    // ✅ VALIDAR ENTRADA
+    if (aba === undefined || denver === undefined || grupo === undefined || escolar === undefined) {
+      console.log('❌ [SUPERVISIONS] Campos obrigatórios ausentes');
+      return res.status(400).json({ message: 'Todos os campos de taxa (aba, denver, grupo, escolar) são obrigatórios' });
+    }
+
+    if (isNaN(Number(aba)) || isNaN(Number(denver)) || isNaN(Number(grupo)) || isNaN(Number(escolar))) {
+      console.log('❌ [SUPERVISIONS] Valores inválidos fornecidos');
+      return res.status(400).json({ message: 'Todas as taxas devem ser números válidos' });
+    }
+
+    const numericRates = {
+      aba: Number(aba),
+      denver: Number(denver),
+      grupo: Number(grupo),
+      escolar: Number(escolar)
+    };
+
+    // ✅ VERIFICAR SE TAXAS JÁ EXISTEM
+    const { data: existingRates, error: checkError } = await supabase
+      .from('supervision_rates')
+      .select('id')
+      .single();
+
+    let result;
+    if (existingRates && !checkError) {
+      console.log('🔄 [SUPERVISIONS] Atualizando taxas existentes');
+      // Atualizar taxas existentes
+      const { data, error } = await supabase
+        .from('supervision_rates')
+        .update({
+          aba: numericRates.aba,
+          denver: numericRates.denver,
+          grupo: numericRates.grupo,
+          escolar: numericRates.escolar,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingRates.id)
+        .select()
+        .single();
+      
+      result = { data, error };
+    } else {
+      console.log('➕ [SUPERVISIONS] Criando novas taxas');
+      // Inserir novas taxas
+      const { data, error } = await supabase
+        .from('supervision_rates')
+        .insert({
+          aba: numericRates.aba,
+          denver: numericRates.denver,
+          grupo: numericRates.grupo,
+          escolar: numericRates.escolar
+        })
+        .select()
+        .single();
+      
+      result = { data, error };
+    }
+
+    if (result.error) {
+      console.error('❌ [SUPERVISIONS] Erro ao salvar taxas:', result.error);
+      return res.status(500).json({ message: 'Erro ao salvar taxas de supervisão', error: result.error.message });
+    }
+
+    console.log('✅ [SUPERVISIONS] Taxas de supervisão salvas com sucesso:', result.data);
+    res.json({
+      message: 'Taxas de supervisão salvas com sucesso',
+      rates: numericRates
     });
+
+  } catch (error) {
+    console.error('❌ [SUPERVISIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao salvar taxas' });
   }
 });
 
