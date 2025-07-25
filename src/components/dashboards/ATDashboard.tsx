@@ -17,6 +17,7 @@ export const ATDashboard: React.FC = () => {
   const [sessions, setSessions] = useState([]);
   const [supervisions, setSupervisions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState('atendimentos'); // 'atendimentos' ou 'supervisoes'
   
   // Estados para atendimentos
@@ -46,13 +47,15 @@ export const ATDashboard: React.FC = () => {
   const [showSubstitutionModal, setShowSubstitutionModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [supervisionSubmitting, setSupervisionSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
+        setError(null);
         
-        console.log('🔍 CARREGANDO DADOS...');
+        console.log('🔍 [AT DASHBOARD] Carregando dados...');
         const [myPatientsData, allSectorPatientsData, sessionsData, supervisionsData] = await Promise.all([
           apiService.getPatients(), // Meus pacientes
           apiService.getPatientsForSubstitution(), // Todos do setor
@@ -60,7 +63,7 @@ export const ATDashboard: React.FC = () => {
           apiService.getSupervisions()
         ]);
         
-        console.log('📊 DADOS CARREGADOS:');
+        console.log('📊 [AT DASHBOARD] Dados carregados:');
         console.log('- Meus pacientes:', myPatientsData.length);
         console.log('- Todos do setor:', allSectorPatientsData.length);
         console.log('- Sessões:', sessionsData.length);
@@ -71,7 +74,8 @@ export const ATDashboard: React.FC = () => {
         setSessions(sessionsData);
         setSupervisions(supervisionsData);
       } catch (error) {
-        console.error('Erro ao carregar dados:', error);
+        console.error('❌ [AT DASHBOARD] Erro ao carregar dados:', error);
+        setError('Erro ao carregar dados. Tente recarregar a página.');
       } finally {
         setLoading(false);
       }
@@ -90,9 +94,11 @@ export const ATDashboard: React.FC = () => {
   );
 
   // Handlers para Atendimentos
-  const handleSessionInputChange = (e) => {
+  const handleSessionInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
-    const checked = e.target.checked;
+    const checked = (e.target as HTMLInputElement).checked;
+    
+    setError(null);
     
     setSessionForm(prev => {
       const newForm = {
@@ -116,87 +122,128 @@ export const ATDashboard: React.FC = () => {
     });
   };
 
-  const handleSubstitutionPatientSelect = (patientId) => {
+  const handleSubstitutionPatientSelect = (patientId: string) => {
     setSessionForm(prev => ({ ...prev, patientId }));
     setShowSubstitutionModal(false);
     setSearchTerm('');
   };
 
-  const handleSessionSubmit = (e) => {
+  const handleSessionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    setError(null);
+    
+    // Validações
     if (!sessionForm.patientId) {
-      alert('Por favor, selecione um paciente');
+      setError('Por favor, selecione um paciente');
       return;
     }
 
-    const createSession = async () => {
-      try {
-        await apiService.createSession({
-          patient_id: sessionForm.patientId,
-          start_time: sessionForm.startTime,
-          end_time: sessionForm.endTime,
-          date: sessionForm.date,
-          observations: sessionForm.observations,
-          is_substitution: sessionForm.isSubstitution
-        });
-        
-        const sessionsData = await apiService.getSessions();
-        setSessions(sessionsData);
-        
-        setSessionForm({
-          patientId: '',
-          startTime: '',
-          endTime: '',
-          date: new Date().toISOString().split('T')[0],
-          observations: '',
-          isSubstitution: false,
-        });
+    if (!sessionForm.startTime || !sessionForm.endTime) {
+      setError('Por favor, preencha os horários de início e fim');
+      return;
+    }
 
-        alert('Atendimento registrado com sucesso!');
-      } catch (error) {
-        console.error('Erro ao criar sessão:', error);
-        alert('Erro ao registrar atendimento');
+    if (!sessionForm.date) {
+      setError('Por favor, selecione uma data');
+      return;
+    }
+
+    // Validar se o horário de fim é posterior ao de início
+    const hours = calculateHours(sessionForm.startTime, sessionForm.endTime);
+    if (hours <= 0) {
+      setError('O horário de fim deve ser posterior ao horário de início');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      console.log('📤 [AT DASHBOARD] Registrando atendimento:', {
+        patient_id: sessionForm.patientId,
+        start_time: sessionForm.startTime,
+        end_time: sessionForm.endTime,
+        date: sessionForm.date,
+        observations: sessionForm.observations,
+        is_substitution: sessionForm.isSubstitution
+      });
+
+      await apiService.createSession({
+        patient_id: sessionForm.patientId,
+        start_time: sessionForm.startTime,
+        end_time: sessionForm.endTime,
+        date: sessionForm.date,
+        observations: sessionForm.observations,
+        is_substitution: sessionForm.isSubstitution
+      });
+      
+      // Recarregar sessões
+      const sessionsData = await apiService.getSessions();
+      setSessions(sessionsData);
+      
+      // Limpar formulário
+      setSessionForm({
+        patientId: '',
+        startTime: '',
+        endTime: '',
+        date: new Date().toISOString().split('T')[0],
+        observations: '',
+        isSubstitution: false,
+      });
+
+      alert('✅ Atendimento registrado com sucesso!');
+      
+    } catch (error) {
+      console.error('❌ [AT DASHBOARD] Erro ao criar sessão:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      setError(`Erro ao registrar atendimento: ${errorMessage}`);
+      
+      // Se for erro de conectividade, mostrar dica
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('conectar')) {
+        setError('Erro de conexão. Verifique se o servidor está rodando e tente novamente.');
       }
-    };
-
-    createSession();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // Handlers para Supervisões - CORRIGIDO
-  const handleSupervisionInputChange = (e) => {
+  // Handlers para Supervisões
+  const handleSupervisionInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setSupervisionForm(prev => ({ ...prev, [name]: value }));
+    setError(null);
   };
 
-const handleSupervisionSubmit = async (e) => {
+  const handleSupervisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    setError(null);
+    
     if (!supervisionForm.startTime || !supervisionForm.endTime || !supervisionForm.date) {
-      alert('Por favor, preencha todos os campos obrigatórios');
+      setError('Por favor, preencha todos os campos obrigatórios');
       return;
     }
 
     const hours = calculateHours(supervisionForm.startTime, supervisionForm.endTime);
     if (hours <= 0) {
-      alert('Horário de fim deve ser posterior ao horário de início');
+      setError('Horário de fim deve ser posterior ao horário de início');
       return;
     }
 
     setSupervisionSubmitting(true);
     
     try {
-      console.log('📤 Lançando supervisão direto para o financeiro:', {
-        at_id: user.id,
+      console.log('📤 [AT DASHBOARD] Lançando supervisão:', {
+        at_id: user?.id,
         start_time: supervisionForm.startTime,
         end_time: supervisionForm.endTime,
         date: supervisionForm.date,
-        observations: supervisionForm.observations,
-        direct_to_finance: true
+        observations: supervisionForm.observations
       });
 
       await apiService.createSupervision({
-        at_id: user.id, // O próprio AT lança sua supervisão
+        at_id: user?.id, // O próprio AT lança sua supervisão
         start_time: supervisionForm.startTime,
         end_time: supervisionForm.endTime,
         date: supervisionForm.date,
@@ -218,31 +265,22 @@ const handleSupervisionSubmit = async (e) => {
       alert('✅ Supervisão lançada com sucesso!');
       
     } catch (error) {
-      console.error('❌ Erro ao criar supervisão:', error);
+      console.error('❌ [AT DASHBOARD] Erro ao criar supervisão:', error);
       
-      // Mensagem de erro mais detalhada
-      let errorMessage = 'Erro ao lançar supervisão';
-      if (error.message) {
-        errorMessage += ': ' + error.message;
-      }
-      
-      if (error.message?.includes('403') || error.message?.includes('permission') || error.message?.includes('policy')) {
-        errorMessage = 'Erro de permissão. Contate o administrador para verificar as configurações do banco de dados.';
-      }
-      
-      alert(errorMessage);
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      setError(`Erro ao lançar supervisão: ${errorMessage}`);
     } finally {
       setSupervisionSubmitting(false);
     }
   };
 
-  // ✅ CORREÇÃO PRINCIPAL: Calcular horas com precisão e soma correta
+  // Calcular horas com precisão
   const currentHours = calculateHours(
     activeTab === 'atendimentos' ? sessionForm.startTime : supervisionForm.startTime,
     activeTab === 'atendimentos' ? sessionForm.endTime : supervisionForm.endTime
   );
 
-  // ✅ CORREÇÃO: Filtrar sessões e supervisões do mês atual com precisão
+  // Filtrar sessões e supervisões do mês atual
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
@@ -261,26 +299,15 @@ const handleSupervisionSubmit = async (e) => {
            supervisionDate.getFullYear() === currentYear;
   });
 
-  // ✅ CORREÇÃO PRINCIPAL: Usar funções precisas para cálculo de horas
+  // Calcular horas com funções precisas
   const sessionHoursThisMonth = sumSessionHours(mySessionsThisMonth);
   
-  // Para supervisões, usar função específica
   const supervisionHoursArray = mySupervisionsThisMonth.map(s => {
-    // Preferir campo hours se existir, senão calcular
     return s.hours || calculateHours(s.start_time, s.end_time);
   });
   const supervisionHoursThisMonth = sumHoursSafely(supervisionHoursArray);
 
-  // ✅ SOMA FINAL CORRIGIDA: Atendimentos + Supervisões
   const totalHoursThisMonth = sessionHoursThisMonth + supervisionHoursThisMonth;
-
-  console.log('📊 CÁLCULO DE HORAS DETALHADO:', {
-    sessionHoursThisMonth: sessionHoursThisMonth.toFixed(4),
-    supervisionHoursThisMonth: supervisionHoursThisMonth.toFixed(4),
-    totalHoursThisMonth: totalHoursThisMonth.toFixed(4),
-    sessionsCount: mySessionsThisMonth.length,
-    supervisionsCount: mySupervisionsThisMonth.length
-  });
 
   const selectedPatient = allSectorPatients.find(p => p.id === sessionForm.patientId);
 
@@ -288,6 +315,7 @@ const handleSupervisionSubmit = async (e) => {
     return (
       <div className="container mx-auto px-4 py-6">
         <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-700 mx-auto mb-4"></div>
           <p className="text-lg text-gray-600">Carregando dados...</p>
         </div>
       </div>
@@ -389,7 +417,7 @@ const handleSupervisionSubmit = async (e) => {
         </div>
       )}
 
-      {/* Stats Cards - CORRIGIDOS COM CÁLCULO EXATO */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="flex items-center space-x-4">
@@ -443,6 +471,23 @@ const handleSupervisionSubmit = async (e) => {
         </Card>
       </div>
 
+      {/* Mensagem de Erro Global */}
+      {error && (
+        <Card>
+          <CardContent>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start space-x-3">
+                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold text-red-800 text-sm">Erro:</p>
+                  <p className="text-red-700 text-sm">{error}</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Abas */}
       <Card>
         <CardHeader>
@@ -478,7 +523,7 @@ const handleSupervisionSubmit = async (e) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Paciente
+                    Paciente *
                   </label>
                   {sessionForm.isSubstitution ? (
                     <div className="space-y-2">
@@ -534,7 +579,7 @@ const handleSupervisionSubmit = async (e) => {
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Data
+                    Data *
                   </label>
                   <Input
                     type="date"
@@ -547,7 +592,7 @@ const handleSupervisionSubmit = async (e) => {
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Início
+                    Hora Início *
                   </label>
                   <Input
                     type="time"
@@ -560,7 +605,7 @@ const handleSupervisionSubmit = async (e) => {
 
                 <div>
                   <label className="block text-sm font-semibold text-purple-800 mb-2">
-                    Hora Fim
+                    Hora Fim *
                   </label>
                   <Input
                     type="time"
@@ -611,15 +656,26 @@ const handleSupervisionSubmit = async (e) => {
                 </div>
               )}
 
-              <Button type="submit" className="w-full">
-                Registrar Atendimento
+              <Button 
+                type="submit" 
+                className="w-full"
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Registrando...</span>
+                  </div>
+                ) : (
+                  'Registrar Atendimento'
+                )}
               </Button>
             </form>
           </CardContent>
         </Card>
       )}
 
-      {/* Formulário de Supervisão - CORRIGIDO */}
+      {/* Formulário de Supervisão */}
       {activeTab === 'supervisoes' && (
         <Card>
           <CardHeader>
@@ -755,7 +811,6 @@ const handleSupervisionSubmit = async (e) => {
                 mySessionsThisMonth.map(session => {
                   const patient = patients.find(p => p.id === session.patient_id) || 
                                  allSectorPatients.find(p => p.id === session.patient_id);
-                  // ✅ USAR CÁLCULO PRECISO para exibição
                   const sessionHours = calculateHours(session.start_time, session.end_time);
                   
                   return (
@@ -793,7 +848,6 @@ const handleSupervisionSubmit = async (e) => {
                 })
               ) : (
                 mySupervisionsThisMonth.map(supervision => {
-                  // ✅ USAR CÁLCULO PRECISO para exibição das supervisões também
                   const supervisionHours = supervision.hours || calculateHours(supervision.start_time, supervision.end_time);
                   
                   return (
