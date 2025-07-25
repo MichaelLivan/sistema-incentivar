@@ -26,7 +26,6 @@ export const AdminDashboard: React.FC = () => {
   const [confirmingSession, setConfirmingSession] = useState<string | null>(null);
   const [rejectingSession, setRejectingSession] = useState<string | null>(null);
   const [operationStatus, setOperationStatus] = useState<{type: 'success' | 'error', message: string} | null>(null);
-  const [lastOperation, setLastOperation] = useState<{action: string, sessionId: string, timestamp: number} | null>(null);
 
   // ✅ CORREÇÃO 1: Verificação de acesso melhorada
   const isAdminSetorial = user?.type?.startsWith('adm-') && user?.type !== 'adm-geral';
@@ -53,14 +52,13 @@ export const AdminDashboard: React.FC = () => {
     
     const canConfirm = allowedTypes.includes(user.type);
     
-    console.log('🔍 [ADMIN] Verificação de permissão detalhada:', {
+    console.log('🔍 [ADMIN] Verificação de permissão:', {
       userType: user.type,
-      userSector: user.sector,
       allowedTypes,
       canConfirm,
       isAdminSetorial,
       isAdminGeral,
-      hasAdminAccess
+      userSector: user.sector
     });
     
     return canConfirm;
@@ -95,61 +93,40 @@ export const AdminDashboard: React.FC = () => {
     );
   }
 
-  const showOperationStatus = (type: 'success' | 'error', message: string, duration = 5000) => {
+  const showOperationStatus = (type: 'success' | 'error', message: string, duration = 4000) => {
     setOperationStatus({ type, message });
     setTimeout(() => setOperationStatus(null), duration);
-  };
-
-  // ✅ FUNÇÃO MELHORADA: Recarregar dados com cache-busting
-  const reloadData = async (forceReload = false) => {
-    try {
-      console.log('🔄 [ADMIN] Recarregando dados...', { forceReload, timestamp: Date.now() });
-      
-      // ✅ Cache busting: adicionar timestamp para forçar reload
-      const cacheBuster = forceReload ? `?t=${Date.now()}` : '';
-      
-      const [patientsData, sessionsData, atsData] = await Promise.all([
-        apiService.getPatients(),
-        apiService.getSessions({ month: selectedMonth, year: selectedYear }),
-        apiService.getATs()
-      ]);
-      
-      console.log('📊 [ADMIN] Dados recarregados:', {
-        patients: patientsData?.length || 0,
-        sessions: sessionsData?.length || 0,
-        ats: atsData?.length || 0,
-        timestamp: new Date().toISOString()
-      });
-      
-      setPatients(patientsData || []);
-      setSessions(sessionsData || []);
-      setAts(atsData || []);
-      
-      if (forceReload) {
-        showOperationStatus('success', '✅ Dados atualizados com sucesso!', 2000);
-      }
-    } catch (error) {
-      console.error('❌ [ADMIN] Erro ao recarregar:', error);
-      showOperationStatus('error', 'Erro ao recarregar dados: ' + (error instanceof Error ? error.message : 'Erro desconhecido'));
-    }
   };
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        console.log('🔄 [ADMIN] Carregamento inicial para usuário:', {
+        console.log('🔄 [ADMIN] Carregando dados para usuário:', {
           name: user?.name,
           type: user?.type,
           sector: user?.sector,
           isAdminGeral,
-          isAdminSetorial,
-          canConfirm: canConfirmSessions()
+          isAdminSetorial
         });
         
-        await reloadData();
+        const [patientsData, sessionsData, atsData] = await Promise.all([
+          apiService.getPatients(),
+          apiService.getSessions({ month: selectedMonth, year: selectedYear }),
+          apiService.getATs()
+        ]);
+        
+        console.log('📊 [ADMIN] Dados carregados:', {
+          patients: patientsData?.length || 0,
+          sessions: sessionsData?.length || 0,
+          ats: atsData?.length || 0
+        });
+        
+        setPatients(patientsData || []);
+        setSessions(sessionsData || []);
+        setAts(atsData || []);
       } catch (error) {
-        console.error('❌ [ADMIN] Erro no carregamento inicial:', error);
+        console.error('❌ [ADMIN] Erro ao carregar dados:', error);
         showOperationStatus('error', 'Erro ao carregar dados: ' + (error instanceof Error ? error.message : 'Erro desconhecido'));
       } finally {
         setLoading(false);
@@ -158,6 +135,25 @@ export const AdminDashboard: React.FC = () => {
 
     loadData();
   }, [selectedMonth, selectedYear, user]);
+
+  const reloadData = async () => {
+    try {
+      console.log('🔄 [ADMIN] Recarregando dados...');
+      const [patientsData, sessionsData, atsData] = await Promise.all([
+        apiService.getPatients(),
+        apiService.getSessions({ month: selectedMonth, year: selectedYear }),
+        apiService.getATs()
+      ]);
+      
+      setPatients(patientsData || []);
+      setSessions(sessionsData || []);
+      setAts(atsData || []);
+      showOperationStatus('success', 'Dados atualizados com sucesso!');
+    } catch (error) {
+      console.error('❌ [ADMIN] Erro ao recarregar:', error);
+      showOperationStatus('error', 'Erro ao recarregar dados');
+    }
+  };
 
   // ✅ CORREÇÃO 3: Filtro de dados por setor mais robusto
   const getUserSectorData = () => {
@@ -179,21 +175,41 @@ export const AdminDashboard: React.FC = () => {
       const patient = patients.find(p => p.id === s.patient_id);
       const sessionSector = patient?.sector;
       
-      const match = sessionSector === userSector;
-      if (match) {
-        console.log('✅ [ADMIN] Sessão incluída:', {
-          sessionId: s.id,
-          patientName: patient?.name,
-          sessionSector,
-          userSector
-        });
-      }
+      console.log('📋 [ADMIN] Verificando sessão:', {
+        sessionId: s.id,
+        patientId: s.patient_id,
+        patientName: patient?.name,
+        sessionSector,
+        userSector,
+        match: sessionSector === userSector
+      });
       
+      return sessionSector === userSector;
+    });
+    
+    const sectorPatients = patients.filter(p => {
+      const match = p.sector === userSector;
+      console.log('👥 [ADMIN] Verificando paciente:', {
+        patientId: p.id,
+        patientName: p.name,
+        patientSector: p.sector,
+        userSector,
+        match
+      });
       return match;
     });
     
-    const sectorPatients = patients.filter(p => p.sector === userSector);
-    const sectorAts = ats.filter(a => a.sector === userSector);
+    const sectorAts = ats.filter(a => {
+      const match = a.sector === userSector;
+      console.log('👨‍⚕️ [ADMIN] Verificando AT:', {
+        atId: a.id,
+        atName: a.name,
+        atSector: a.sector,
+        userSector,
+        match
+      });
+      return match;
+    });
     
     console.log('📊 [ADMIN] Dados filtrados por setor:', {
       userSector,
@@ -236,19 +252,16 @@ export const AdminDashboard: React.FC = () => {
 
     try {
       setConfirmingSession(sessionId);
-      setLastOperation({ action: 'confirming', sessionId, timestamp: Date.now() });
       
-      console.log('✅ [ADMIN] Iniciando confirmação detalhada:', {
+      console.log('✅ [ADMIN] Iniciando confirmação:', {
         sessionId,
         user: {
-          id: user?.id,
           name: user?.name,
           email: user?.email,
           type: user?.type,
           sector: user?.sector
         },
-        canConfirm: canConfirmSessions(),
-        timestamp: new Date().toISOString()
+        canConfirm: canConfirmSessions()
       });
       
       // Buscar dados da sessão para logs
@@ -269,76 +282,73 @@ export const AdminDashboard: React.FC = () => {
         date: sessionToConfirm.date,
         start_time: sessionToConfirm.start_time,
         end_time: sessionToConfirm.end_time,
-        is_confirmed: sessionToConfirm.is_confirmed,
-        patient_sector: patients.find(p => p.id === sessionToConfirm.patient_id)?.sector
+        is_confirmed: sessionToConfirm.is_confirmed
       });
       
       // ✅ Chamada para API com tratamento de erro melhorado
       console.log('📤 [ADMIN] Enviando requisição de confirmação...');
       
-      const response = await apiService.confirmSession(sessionId);
-      console.log('📥 [ADMIN] Resposta da API recebida:', response);
-      
-      // ✅ Aguardar um pouco antes de recarregar para garantir que a mudança foi persistida
-      console.log('⏳ [ADMIN] Aguardando propagação da mudança...');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // ✅ Recarregar dados forçadamente
-      console.log('🔄 [ADMIN] Recarregando dados após confirmação...');
-      await reloadData(true);
-      
-      // Encontrar informações do paciente para mensagem
-      const patient = patients.find(p => p.id === sessionToConfirm.patient_id);
-      const patientName = patient?.name || 'Paciente não identificado';
-      
-      console.log('✅ [ADMIN] Confirmação concluída com sucesso!');
-      showOperationStatus('success', 
-        `✅ Atendimento confirmado com sucesso!\n\n` +
-        `📅 Paciente: ${patientName}\n` +
-        `📱 Status: Agora visível para os pais\n` +
-        `👤 Confirmado por: ${user?.name} (${user?.type})`,
-        6000
-      );
-      
-      setLastOperation({ action: 'confirmed', sessionId, timestamp: Date.now() });
-      
-    } catch (apiError) {
-      console.error('❌ [ADMIN] Erro na API de confirmação:', apiError);
-      
-      // Tratamento detalhado de erro da API
-      let errorMessage = 'Erro ao confirmar atendimento';
-      
-      if (apiError instanceof Error) {
-        const message = apiError.message.toLowerCase();
+      try {
+        const response = await apiService.confirmSession(sessionId);
+        console.log('📥 [ADMIN] Resposta recebida:', response);
         
-        if (message.includes('403') || message.includes('forbidden') || message.includes('access denied')) {
-          errorMessage = `❌ Acesso negado pelo servidor\n\n` +
-                        `Seu tipo de usuário: ${user?.type}\n` +
-                        `Setor: ${user?.sector || 'N/A'}\n\n` +
-                        `Verifique com o administrador se suas permissões estão corretas.`;
-        } else if (message.includes('401') || message.includes('unauthorized')) {
-          errorMessage = '❌ Sessão expirada. Faça login novamente';
-        } else if (message.includes('404') || message.includes('not found')) {
-          errorMessage = '❌ Atendimento não encontrado no servidor';
-        } else if (message.includes('500') || message.includes('internal server error')) {
-          errorMessage = '❌ Erro interno do servidor. Contate o suporte técnico';
-        } else if (message.includes('failed to fetch') || message.includes('connection')) {
-          errorMessage = '❌ Erro de conexão. Verifique se o servidor está rodando';
-        } else {
-          errorMessage = `❌ ${apiError.message}`;
+        // ✅ Recarregar dados imediatamente
+        console.log('🔄 [ADMIN] Recarregando dados após confirmação...');
+        await reloadData();
+        
+        // Encontrar informações do paciente para mensagem
+        const patient = patients.find(p => p.id === sessionToConfirm.patient_id);
+        const patientName = patient?.name || 'Paciente não identificado';
+        
+        console.log('✅ [ADMIN] Confirmação concluída com sucesso!');
+        showOperationStatus('success', 
+          `✅ Atendimento confirmado com sucesso!\n\n` +
+          `📅 Paciente: ${patientName}\n` +
+          `📱 Status: Agora visível para os pais\n` +
+          `👤 Confirmado por: ${user?.name} (${user?.type})`,
+          5000
+        );
+        
+      } catch (apiError) {
+        console.error('❌ [ADMIN] Erro na API de confirmação:', apiError);
+        
+        // Tratamento detalhado de erro da API
+        let errorMessage = 'Erro ao confirmar atendimento';
+        
+        if (apiError instanceof Error) {
+          const message = apiError.message.toLowerCase();
+          
+          if (message.includes('403') || message.includes('forbidden') || message.includes('access denied')) {
+            errorMessage = `❌ Acesso negado pelo servidor\n\n` +
+                          `Seu tipo de usuário: ${user?.type}\n` +
+                          `Setor: ${user?.sector || 'N/A'}\n\n` +
+                          `Verifique com o administrador se suas permissões estão corretas.`;
+          } else if (message.includes('401') || message.includes('unauthorized')) {
+            errorMessage = '❌ Sessão expirada. Faça login novamente';
+          } else if (message.includes('404') || message.includes('not found')) {
+            errorMessage = '❌ Atendimento não encontrado no servidor';
+          } else if (message.includes('500') || message.includes('internal server error')) {
+            errorMessage = '❌ Erro interno do servidor. Contate o suporte técnico';
+          } else if (message.includes('failed to fetch') || message.includes('connection')) {
+            errorMessage = '❌ Erro de conexão. Verifique se o servidor está rodando';
+          } else {
+            errorMessage = `❌ ${apiError.message}`;
+          }
+        }
+        
+        showOperationStatus('error', errorMessage, 8000);
+        
+        // Tentar recarregar dados mesmo com erro
+        try {
+          await reloadData();
+        } catch (reloadError) {
+          console.error('❌ [ADMIN] Erro ao recarregar após falha:', reloadError);
         }
       }
       
-      showOperationStatus('error', errorMessage, 8000);
-      setLastOperation({ action: 'error', sessionId, timestamp: Date.now() });
-      
-      // Tentar recarregar dados mesmo com erro
-      try {
-        await reloadData(true);
-      } catch (reloadError) {
-        console.error('❌ [ADMIN] Erro ao recarregar após falha:', reloadError);
-      }
-      
+    } catch (error) {
+      console.error('❌ [ADMIN] Erro geral na confirmação:', error);
+      showOperationStatus('error', 'Erro inesperado ao confirmar atendimento');
     } finally {
       setConfirmingSession(null);
     }
@@ -361,24 +371,17 @@ export const AdminDashboard: React.FC = () => {
 
     try {
       setRejectingSession(sessionId);
-      setLastOperation({ action: 'rejecting', sessionId, timestamp: Date.now() });
-      
       console.log('🗑️ [ADMIN] Rejeitando sessão:', sessionId);
       
       await apiService.deleteSession(sessionId);
-      
-      // Aguardar propagação
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await reloadData(true);
+      await reloadData();
       
       console.log('✅ [ADMIN] Sessão rejeitada com sucesso');
       showOperationStatus('success', `✅ Atendimento de ${patientName} rejeitado e removido do sistema.`);
-      setLastOperation({ action: 'rejected', sessionId, timestamp: Date.now() });
       
     } catch (error) {
       console.error('❌ [ADMIN] Erro ao rejeitar sessão:', error);
       showOperationStatus('error', 'Erro ao rejeitar atendimento. Tente novamente.');
-      setLastOperation({ action: 'error', sessionId, timestamp: Date.now() });
     } finally {
       setRejectingSession(null);
     }
@@ -400,42 +403,31 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
-      {/* Status das Operações - MELHORADO */}
+      {/* Status das Operações */}
       {operationStatus && (
-        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-xl max-w-md border-2 ${
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${
           operationStatus.type === 'success' 
-            ? 'bg-green-50 border-green-300' 
-            : 'bg-red-50 border-red-300'
+            ? 'bg-green-50 border border-green-200' 
+            : 'bg-red-50 border border-red-200'
         }`}>
           <div className="flex items-start space-x-3">
             {operationStatus.type === 'success' ? (
-              <CheckCircle className="w-6 h-6 text-green-600 mt-0.5 flex-shrink-0" />
+              <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
             ) : (
-              <AlertTriangle className="w-6 h-6 text-red-600 mt-0.5 flex-shrink-0" />
+              <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
             )}
-            <div className="flex-1">
-              <p className={`font-bold text-sm ${
+            <div>
+              <p className={`font-medium text-sm ${
                 operationStatus.type === 'success' ? 'text-green-800' : 'text-red-800'
               }`}>
-                {operationStatus.type === 'success' ? '🎉 Sucesso!' : '🚨 Erro!'}
+                {operationStatus.type === 'success' ? 'Sucesso!' : 'Erro!'}
               </p>
               <p className={`text-sm whitespace-pre-line ${
                 operationStatus.type === 'success' ? 'text-green-700' : 'text-red-700'
               }`}>
                 {operationStatus.message}
               </p>
-              {lastOperation && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Última operação: {lastOperation.action} às {new Date(lastOperation.timestamp).toLocaleTimeString()}
-                </p>
-              )}
             </div>
-            <button
-              onClick={() => setOperationStatus(null)}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
         </div>
       )}
@@ -453,7 +445,7 @@ export const AdminDashboard: React.FC = () => {
               </p>
             </div>
             <Button 
-              onClick={() => reloadData(true)}
+              onClick={reloadData}
               variant="secondary"
               size="sm"
               disabled={loading}
@@ -463,7 +455,7 @@ export const AdminDashboard: React.FC = () => {
             </Button>
           </div>
 
-          {/* ✅ CORREÇÃO 6: Info de debug melhorada para administradores */}
+          {/* ✅ CORREÇÃO 6: Info de debug para administradores */}
           <div className="bg-blue-50 p-3 rounded-lg mt-3">
             <div className="flex items-center space-x-2">
               <CheckCircle className="w-5 h-5 text-blue-600" />
@@ -472,8 +464,7 @@ export const AdminDashboard: React.FC = () => {
                   ✅ Permissões: {canConfirmSessions() ? 'Pode confirmar atendimentos' : 'Não pode confirmar atendimentos'}
                 </p>
                 <p className="text-xs text-blue-700">
-                  Usuário: {user?.name} ({user?.type}) | Setor: {user?.sector || 'Não definido'} | 
-                  Dados carregados: {sectorSessions.length} sessões, {sectorPatients.length} pacientes
+                  Usuário: {user?.name} ({user?.type}) | Setor: {user?.sector || 'Não definido'}
                 </p>
               </div>
             </div>
@@ -587,7 +578,7 @@ export const AdminDashboard: React.FC = () => {
           </CardTitle>
           <div className="bg-blue-50 p-3 rounded-lg mt-3">
             <p className="text-sm text-blue-800 font-medium">
-              ✅ <strong>Confirme os atendimentos</strong> para que sejam enviados automaticamente aos pais.
+              ✅ <strong>Confirme os atendimentos</strong> para que sejam enviados automaticamente ao financeiro.
             </p>
             <p className="text-xs text-blue-700 mt-1">
               ℹ️ Após confirmar, os atendimentos ficam visíveis para os pais e seguem para aprovação administrativa.
@@ -630,11 +621,9 @@ export const AdminDashboard: React.FC = () => {
                 const isConfirming = confirmingSession === session.id;
                 const isRejecting = rejectingSession === session.id;
                 const isProcessing = isConfirming || isRejecting;
-                const wasJustProcessed = lastOperation?.sessionId === session.id && 
-                                       (Date.now() - (lastOperation?.timestamp || 0)) < 10000;
 
                 return (
-                  <TableRow key={session.id} className={`hover:bg-yellow-50 ${wasJustProcessed ? 'bg-green-50' : ''}`}>
+                  <TableRow key={session.id} className="hover:bg-yellow-50">
                     <TableCell>{formatDateBR(session.date)}</TableCell>
                     <TableCell className="font-medium">
                       {patient?.name || 'N/A'}
@@ -670,17 +659,17 @@ export const AdminDashboard: React.FC = () => {
                             onClick={() => handleConfirmSession(session.id)}
                             disabled={isProcessing}
                             title="✅ Confirmar atendimento - Ficará visível para os pais"
-                            className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
                           >
                             {isConfirming ? (
                               <div className="flex items-center space-x-1">
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                <span className="text-xs">Confirmando...</span>
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>Confirmando...</span>
                               </div>
                             ) : (
                               <>
                                 <CheckCircle size={14} className="mr-1" />
-                                <span className="text-xs">Confirmar</span>
+                                Confirmar
                               </>
                             )}
                           </Button>
@@ -690,17 +679,17 @@ export const AdminDashboard: React.FC = () => {
                             onClick={() => handleRejectSession(session.id)}
                             disabled={isProcessing}
                             title="❌ Rejeitar atendimento - Será removido do sistema"
-                            className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
                           >
                             {isRejecting ? (
                               <div className="flex items-center space-x-1">
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                <span className="text-xs">Rejeitando...</span>
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>Rejeitando...</span>
                               </div>
                             ) : (
                               <>
                                 <X size={14} className="mr-1" />
-                                <span className="text-xs">Rejeitar</span>
+                                Rejeitar
                               </>
                             )}
                           </Button>

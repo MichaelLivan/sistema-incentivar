@@ -191,7 +191,7 @@ export const PaisDashboard: React.FC = () => {
             <div>
               <p className="text-sm text-gray-600">Atendimentos</p>
               <p className="text-2xl font-bold text-purple-700">{confirmedSessions}</p>
-              <p className="text-xs text-green-600">Confirmados pela recepção</p>
+              <p className="text-xs text-green-600">Realizado!</p>
             </div>
           </CardContent>
         </Card>
