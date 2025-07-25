@@ -27,6 +27,21 @@ class ApiService {
     return import.meta.env.VITE_API_URL || '/api';
   }
 
+  private getFullUrl(path: string): string {
+    // If baseURL is already absolute, use it directly
+    if (this.baseURL.startsWith('http://') || this.baseURL.startsWith('https://')) {
+      return `${this.baseURL}${path}`;
+    }
+    
+    // If baseURL is relative, resolve against window.location.origin
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}${this.baseURL}${path}`;
+    }
+    
+    // Fallback for server-side rendering
+    return `${this.baseURL}${path}`;
+  }
+
   private getAuthHeaders(): Record<string, string> {
     const token = localStorage.getItem('authToken');
     const headers: Record<string, string> = {
@@ -253,7 +268,8 @@ class ApiService {
     console.log('🔄 [API] Carregando usuários:', filters);
     
     try {
-      const url = new URL(`${this.baseURL}/users`);
+      const baseUrl = this.getFullUrl('/users');
+      const url = new URL(baseUrl);
       
       // Adicionar filtros
       Object.entries(filters).forEach(([key, value]) => {
