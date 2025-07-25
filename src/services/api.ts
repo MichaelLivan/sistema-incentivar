@@ -16,15 +16,25 @@ class ApiService {
       
       if (hostname === 'localhost' || hostname === '127.0.0.1') {
         // Desenvolvimento local
-        return 'http://localhost:3001/api';
+        const url = 'http://localhost:3001/api';
+        try {
+          new URL(url); // Validate URL
+          return url;
+        } catch {
+          return `${window.location.origin}/api`;
+        }
       } else {
         // Produção - usar URL relativa
-        return '/api';
+        return `${window.location.origin}/api`;
       }
     }
     
     // Fallback
-    return import.meta.env.VITE_API_URL || '/api';
+    const fallbackUrl = import.meta.env.VITE_API_URL || '/api';
+    if (fallbackUrl.startsWith('http://') || fallbackUrl.startsWith('https://')) {
+      return fallbackUrl;
+    }
+    return `${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'}${fallbackUrl}`;
   }
 
   private getFullUrl(path: string): string {
