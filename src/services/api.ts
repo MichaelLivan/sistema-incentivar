@@ -281,6 +281,38 @@ class ApiService {
     }
   }
 
+  // TESTE BÁSICO DE CONECTIVIDADE
+  async testBasicConnectivity() {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(`${this.baseURL}/users`, {
+        method: 'HEAD', // Apenas cabeçalhos, mais rápido
+        headers: this.getAuthHeaders(),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeout);
+      
+      if (response.status === 401) {
+        throw new Error('Token de autenticação inválido');
+      }
+      
+      if (response.status === 403) {
+        throw new Error('Sem permissão para acessar este recurso');
+      }
+      
+      return true;
+      
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error('Timeout na conexão com o servidor');
+      }
+      throw error;
+    }
+  }
+
   // FUNÇÃO PARA OBTER USUÁRIOS COM RETRY
   async getUsers(filters = {}) {
     console.log('🔄 [API] Carregando usuários:', filters);
