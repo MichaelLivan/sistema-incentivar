@@ -90,6 +90,7 @@ export const AdminDashboard: React.FC = () => {
   const [editingAT, setEditingAT] = useState<string | null>(null);
   const [editingPatient, setEditingPatient] = useState<string | null>(null);
   const [operationStatus, setOperationStatus] = useState<{type: 'success' | 'error', message: string} | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [newATForm, setNewATForm] = useState<NewATForm>({
     name: '',
@@ -1185,6 +1186,26 @@ export const AdminDashboard: React.FC = () => {
                       value={newATForm.name}
                       onChange={handleATInputChange}
                       placeholder="Nome completo do AT"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Email *
+                    </label>
+                    <Input
+                      type="email"
+                      name="email"
+                      value={newATForm.email}
+                      onChange={handleATInputChange}
+                      placeholder="email@exemplo.com"
+                      required
+                      disabled={!!editingAT}
+                    />
+                    {editingAT && (
+                      <p className="text-xs text-gray-500 mt-1">Email não pode ser alterado</p>
+                    )}
+                  </div>
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Setor *
@@ -1205,7 +1226,6 @@ export const AdminDashboard: React.FC = () => {
                       <p className="text-xs text-gray-500 mt-1">Setor fixo: {userSector?.toUpperCase()}</p>
                     )}
                   </div>
-                      required
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Valor por Hora (R$) *
@@ -1222,7 +1242,7 @@ export const AdminDashboard: React.FC = () => {
                     />
                   </div>
                 </div>
-                    />
+                
                 <div className="flex justify-end space-x-3 pt-4 border-t">
                   <Button 
                     type="button" 
@@ -1240,7 +1260,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </form>
             )}
-                  </div>
+            
             {/* Lista de ATs */}
             <Table>
               <TableHeader>
@@ -1298,7 +1318,7 @@ export const AdminDashboard: React.FC = () => {
           </CardContent>
         </Card>
       )}
-                  <div>
+
       {/* ABA: Gerenciar Pacientes */}
       {activeTab === 'pacientes' && (
         <Card>
@@ -1351,7 +1371,6 @@ export const AdminDashboard: React.FC = () => {
                       required
                     />
                   </div>
-                    <label className="block text-sm font-semibold text-purple-800 mb-2">
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Setor *
@@ -1372,7 +1391,6 @@ export const AdminDashboard: React.FC = () => {
                       <p className="text-xs text-gray-500 mt-1">Setor fixo: {userSector?.toUpperCase()}</p>
                     )}
                   </div>
-                      Email *
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       AT Responsável
@@ -1390,7 +1408,6 @@ export const AdminDashboard: React.FC = () => {
                       ))}
                     </Select>
                   </div>
-                    </label>
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Carga Horária Semanal
@@ -1405,7 +1422,6 @@ export const AdminDashboard: React.FC = () => {
                       min="0"
                     />
                   </div>
-                    <Input
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Valor por Hora (R$)
@@ -1420,11 +1436,9 @@ export const AdminDashboard: React.FC = () => {
                       min="0"
                     />
                   </div>
-                      type="email"
                   <div className="md:col-span-2">
                     <h4 className="text-md font-semibold text-purple-800 mb-3">Dados do Responsável Principal</h4>
                   </div>
-                      name="email"
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Nome do Responsável *
@@ -1437,7 +1451,6 @@ export const AdminDashboard: React.FC = () => {
                       required
                     />
                   </div>
-                      value={newATForm.email}
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Email do Responsável *
@@ -1451,11 +1464,9 @@ export const AdminDashboard: React.FC = () => {
                       required
                     />
                   </div>
-                      onChange={handleATInputChange}
                   <div className="md:col-span-2">
                     <h4 className="text-md font-semibold text-purple-800 mb-3">Segundo Responsável (Opcional)</h4>
                   </div>
-                      placeholder="email@exemplo.com"
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Nome do 2º Responsável
@@ -1467,7 +1478,6 @@ export const AdminDashboard: React.FC = () => {
                       placeholder="Nome completo"
                     />
                   </div>
-                      required
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
                       Email do 2º Responsável
@@ -1481,7 +1491,7 @@ export const AdminDashboard: React.FC = () => {
                     />
                   </div>
                 </div>
-                      disabled={!!editingAT}
+                
                 <div className="flex justify-end space-x-3 pt-4 border-t">
                   <Button 
                     type="button" 
@@ -1499,7 +1509,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </form>
             )}
-                    />
+            
             {/* Lista de Pacientes */}
             <Table>
               <TableHeader>
@@ -1550,7 +1560,7 @@ export const AdminDashboard: React.FC = () => {
                 })}
               </TableBody>
             </Table>
-                    {editingAT && (
+            
             {sectorPatients.length === 0 && (
               <div className="text-center py-8 text-gray-500">
                 <Users className="w-16 h-16 mx-auto text-gray-300 mb-4" />
@@ -1560,7 +1570,7 @@ export const AdminDashboard: React.FC = () => {
           </CardContent>
         </Card>
       )}
-                      <p className="text-xs text-gray-500 mt-1">Email não pode ser alterado</p>
+
       {/* ABA: Gerenciar Atendimentos */}
       {activeTab === 'atendimentos' && (
         <Card>
@@ -1585,7 +1595,7 @@ export const AdminDashboard: React.FC = () => {
                   const patient = patients.find(p => p.id === session.patient_id);
                   const at = ats.find(a => a.id === session.at_id);
                   const hours = calculateHours(session.start_time, session.end_time);
-                    )}
+                  
                   return (
                     <TableRow key={session.id}>
                       <TableCell>{formatDateBR(session.date)}</TableCell>
@@ -1663,7 +1673,7 @@ export const AdminDashboard: React.FC = () => {
                 })}
               </TableBody>
             </Table>
-                  </div>
+            
             {filteredSessions.length === 0 && (
               <div className="text-center py-8 text-gray-500">
                 <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
