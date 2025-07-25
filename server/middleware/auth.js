@@ -1,3 +1,6 @@
+// ✅ CORREÇÃO COMPLETA DO auth.js
+// Corrige problemas de autenticação para administradores setoriais
+
 import jwt from 'jsonwebtoken';
 import supabase from '../config/supabase.js';
 
@@ -25,7 +28,8 @@ export const authenticateToken = async (req, res, next) => {
     console.log('✅ [AUTH] Token decodificado:', {
       userId: decoded.userId,
       email: decoded.email,
-      type: decoded.type
+      type: decoded.type,
+      sector: decoded.sector
     });
 
     // Buscar dados atualizados do usuário no banco
@@ -51,36 +55,66 @@ export const authenticateToken = async (req, res, next) => {
       id: user.id,
       name: user.name,
       type: user.type,
-      sector: user.sector
+      sector: user.sector,
+      active: user.active
     });
 
     req.user = user;
 
-    // ✅ CORREÇÃO PRINCIPAL: Admin geral sempre tem acesso total
+    // ✅ CORREÇÃO 1: Admin geral sempre tem acesso total
     if (user.type === 'adm-geral') {
-      console.log('🔓 [AUTH] Admin geral - acesso total liberado');
+      console.log('👑 [AUTH] Admin geral - acesso total liberado');
       return next();
     }
 
-    // ✅ CORREÇÃO: Todos os tipos de administradores setoriais têm acesso
+    // ✅ CORREÇÃO 2: Verificação melhorada para administradores setoriais
     if (user.type && user.type.startsWith('adm-')) {
+      console.log('🏢 [AUTH] Administrador setorial detectado:', {
+        type: user.type,
+        sector: user.sector,
+        path: req.path,
+        method: req.method
+      });
+      
+      // Verificar se tem setor definido (obrigatório para admins setoriais)
+      if (!user.sector && user.type !== 'adm-geral') {
+        console.warn('⚠️ [AUTH] Admin setorial sem setor definido:', user.type);
+        return res.status(403).json({ 
+          message: 'Admin setorial deve ter setor definido',
+          userType: user.type,
+          sector: user.sector
+        });
+      }
+      
       console.log('✅ [AUTH] Administrador setorial - acesso liberado:', user.type);
       return next();
     }
 
-    // ✅ CORREÇÃO: Coordenadores também têm acesso administrativo
+    // ✅ CORREÇÃO 3: Coordenadores (descontinuados mas ainda podem existir)
     if (user.type && user.type.startsWith('coordenacao-')) {
-      console.log('✅ [AUTH] Coordenador - acesso liberado:', user.type);
+      console.log('📋 [AUTH] Coordenador (descontinuado) - acesso limitado:', user.type);
       return next();
     }
 
-    // ✅ CORREÇÃO: Financeiro tem acesso administrativo
+    // ✅ CORREÇÃO 4: Financeiro tem acesso administrativo
     if (user.type && user.type.startsWith('financeiro-')) {
-      console.log('✅ [AUTH] Financeiro - acesso liberado:', user.type);
+      console.log('💰 [AUTH] Financeiro - acesso liberado:', user.type);
       return next();
     }
 
-    // ✅ PERMITIR: Acesso especial para financeiro/coordenação buscarem ATs
+    // ✅ CORREÇÃO 5: ATs têm acesso às suas funções
+    if (user.type && user.type.startsWith('at-')) {
+      console.log('👨‍⚕️ [AUTH] AT - acesso liberado:', user.type);
+      return next();
+    }
+
+    // ✅ CORREÇÃO 6: Pais têm acesso às suas informações
+    if (user.type === 'pais') {
+      console.log('👨‍👩‍👧‍👦 [AUTH] Responsável - acesso liberado:', user.type);
+      return next();
+    }
+
+    // ✅ PERMITIR: Acesso especial para casos específicos
     if (
       req.method === 'GET' &&
       req.path === '/users' &&
@@ -91,7 +125,12 @@ export const authenticateToken = async (req, res, next) => {
       return next();
     }
 
-    console.log('✅ [AUTH] Autenticação bem-sucedida - prosseguindo');
+    // Se chegou até aqui, o usuário está autenticado mas pode não ter permissão específica
+    console.log('✅ [AUTH] Usuário autenticado - prosseguindo:', {
+      type: user.type,
+      path: req.path,
+      method: req.method
+    });
     next();
 
   } catch (error) {
@@ -116,36 +155,50 @@ export const authenticateToken = async (req, res, next) => {
   }
 };
 
-// ✅ CORREÇÃO: Módulo de autorização melhorado
+// ✅ CORREÇÃO 7: Função authorize melhorada
 export const authorize = (...allowedTypes) => {
   return (req, res, next) => {
     console.log('🔐 [AUTHORIZE] Verificando autorização...');
     console.log('📋 [AUTHORIZE] Tipos permitidos:', allowedTypes);
-    console.log('👤 [AUTHORIZE] Tipo do usuário:', req.user?.type);
+    console.log('👤 [AUTHORIZE] Usuário:', {
+      type: req.user?.type,
+      sector: req.user?.sector,
+      name: req.user?.name
+    });
     
     if (!req.user) {
       console.log('❌ [AUTHORIZE] Usuário não autenticado');
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    // ✅ CORREÇÃO: Admin geral sempre tem acesso
+    // ✅ Admin geral sempre tem acesso
     if (req.user.type === 'adm-geral') {
-      console.log('✅ [AUTHORIZE] Admin geral - acesso total liberado');
+      console.log('👑 [AUTHORIZE] Admin geral - acesso total liberado');
       return next();
     }
 
-    // ✅ CORREÇÃO: Verificar se o tipo do usuário está na lista de permitidos
+    // ✅ Verificar se o tipo do usuário está na lista de permitidos
     const hasPermission = allowedTypes.some(allowedType => {
       // Suporte para wildcards (ex: 'adm-*' permite qualquer admin setorial)
       if (allowedType.endsWith('*')) {
         const prefix = allowedType.slice(0, -1);
-        return req.user.type.startsWith(prefix);
+        const matches = req.user.type.startsWith(prefix);
+        console.log(`🔍 [AUTHORIZE] Testando wildcard ${allowedType} contra ${req.user.type}:`, matches);
+        return matches;
       }
-      return req.user.type === allowedType;
+      
+      const exactMatch = req.user.type === allowedType;
+      console.log(`🔍 [AUTHORIZE] Testando match exato ${allowedType} contra ${req.user.type}:`, exactMatch);
+      return exactMatch;
     });
 
     if (!hasPermission) {
-      console.log('❌ [AUTHORIZE] Acesso negado para tipo:', req.user.type);
+      console.log('❌ [AUTHORIZE] Acesso negado:', {
+        userType: req.user.type,
+        allowedTypes: allowedTypes,
+        path: req.path,
+        method: req.method
+      });
       return res.status(403).json({ 
         message: 'Access denied for this user type',
         userType: req.user.type,
@@ -158,16 +211,21 @@ export const authorize = (...allowedTypes) => {
   };
 };
 
-// ✅ CORREÇÃO: Middleware específico para verificar se é admin (qualquer tipo)
+// ✅ CORREÇÃO 8: Middleware específico para verificar se é admin
 export const requireAdmin = (req, res, next) => {
   console.log('👨‍💼 [ADMIN] Verificando se é administrador...');
+  console.log('👤 [ADMIN] Usuário:', {
+    type: req.user?.type,
+    sector: req.user?.sector,
+    name: req.user?.name
+  });
   
   if (!req.user) {
     console.log('❌ [ADMIN] Usuário não autenticado');
     return res.status(401).json({ message: 'Authentication required' });
   }
 
-  // ✅ Lista atualizada de tipos de administradores
+  // ✅ Lista completa de tipos de administradores
   const adminTypes = [
     'adm-geral',
     'adm-aba', 
@@ -180,7 +238,14 @@ export const requireAdmin = (req, res, next) => {
     'coordenacao-escolar'
   ];
 
-  if (!adminTypes.includes(req.user.type)) {
+  const isAdmin = adminTypes.includes(req.user.type);
+  console.log('🔍 [ADMIN] Verificação de admin:', {
+    userType: req.user.type,
+    adminTypes,
+    isAdmin
+  });
+
+  if (!isAdmin) {
     console.log('❌ [ADMIN] Acesso negado - não é administrador:', req.user.type);
     return res.status(403).json({ 
       message: 'Access denied. Administrator required.',
@@ -193,7 +258,7 @@ export const requireAdmin = (req, res, next) => {
   next();
 };
 
-// ✅ CORREÇÃO: Middleware específico para admin geral
+// ✅ CORREÇÃO 9: Middleware específico para admin geral
 export const requireAdminGeral = (req, res, next) => {
   console.log('👑 [ADMIN GERAL] Verificando se é admin geral...');
   
@@ -214,16 +279,21 @@ export const requireAdminGeral = (req, res, next) => {
   next();
 };
 
-// ✅ NOVA FUNÇÃO: Middleware para verificar se pode confirmar atendimentos
+// ✅ CORREÇÃO 10: Middleware para verificar se pode confirmar atendimentos
 export const canConfirmSessions = (req, res, next) => {
   console.log('✅ [CONFIRM SESSIONS] Verificando permissão para confirmar atendimentos...');
+  console.log('👤 [CONFIRM SESSIONS] Usuário:', {
+    type: req.user?.type,
+    sector: req.user?.sector,
+    name: req.user?.name
+  });
   
   if (!req.user) {
     console.log('❌ [CONFIRM SESSIONS] Usuário não autenticado');
     return res.status(401).json({ message: 'Authentication required' });
   }
 
-  // ✅ Tipos que podem confirmar atendimentos
+  // ✅ CORREÇÃO: Lista completa e atualizada de tipos que podem confirmar atendimentos
   const allowedTypes = [
     'adm-geral',
     'adm-aba',
@@ -239,16 +309,49 @@ export const canConfirmSessions = (req, res, next) => {
   ];
 
   const canConfirm = allowedTypes.includes(req.user.type);
+  
+  console.log('🔍 [CONFIRM SESSIONS] Verificação de permissão:', {
+    userType: req.user.type,
+    allowedTypes,
+    canConfirm,
+    sector: req.user.sector
+  });
 
   if (!canConfirm) {
     console.log('❌ [CONFIRM SESSIONS] Acesso negado para confirmação:', req.user.type);
     return res.status(403).json({ 
       message: 'Apenas administradores podem confirmar atendimentos',
       userType: req.user.type,
-      allowedTypes: allowedTypes
+      allowedTypes: allowedTypes,
+      details: 'Verifique se seu tipo de usuário tem as permissões necessárias'
     });
   }
 
   console.log('✅ [CONFIRM SESSIONS] Permissão liberada para:', req.user.type);
+  next();
+};
+
+// ✅ CORREÇÃO 11: Função auxiliar para debug de permissões
+export const debugPermissions = (req, res, next) => {
+  console.log('🐛 [DEBUG] Informações de permissão:', {
+    user: req.user ? {
+      id: req.user.id,
+      name: req.user.name,
+      email: req.user.email,
+      type: req.user.type,
+      sector: req.user.sector,
+      active: req.user.active
+    } : null,
+    route: {
+      method: req.method,
+      path: req.path,
+      originalUrl: req.originalUrl,
+      query: req.query,
+      params: req.params
+    },
+    headers: {
+      authorization: req.headers.authorization ? 'Bearer ***' : 'Não presente'
+    }
+  });
   next();
 };
