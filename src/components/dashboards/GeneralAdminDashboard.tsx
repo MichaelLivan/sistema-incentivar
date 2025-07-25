@@ -259,26 +259,18 @@ export const GeneralAdminDashboard = () => {
     }
   };
 
-  // Excluir usuário com confirmação melhorada
+  // ✅ FUNÇÃO DE EXCLUSÃO SIMPLIFICADA - SEM CONFIRMAÇÃO COMPLEXA
   const handleDeleteUser = async (userId) => {
     const userToDelete = users.find(u => u.id === userId);
     if (!userToDelete) return;
 
-    const confirmMessage = `⚠️ ATENÇÃO: Exclusão Permanente\n\n` +
-      `Usuário: ${userToDelete.name}\n` +
-      `Email: ${userToDelete.email}\n` +
-      `Tipo: ${userToDelete.type}\n\n` +
-      `Esta ação irá:\n` +
-      `• Excluir permanentemente o usuário\n` +
-      `• Remover todas as sessões relacionadas\n` +
-      `• Remover todas as supervisões relacionadas\n` +
-      `• Desvincular pacientes (se aplicável)\n\n` +
-      `⚠️ ESTA AÇÃO NÃO PODE SER DESFEITA!\n\n` +
-      `Digite "CONFIRMAR" para prosseguir:`;
-
-    const userConfirmation = prompt(confirmMessage);
+    // ✅ CONFIRMAÇÃO SIMPLES - apenas sim/não
+    const confirmDelete = window.confirm(
+      `Tem certeza que deseja excluir o usuário "${userToDelete.name}"?\n\n` +
+      `Esta ação não pode ser desfeita.`
+    );
     
-    if (userConfirmation !== 'CONFIRMAR') {
+    if (!confirmDelete) {
       console.log('🚫 [ADMIN GERAL] Exclusão cancelada pelo usuário');
       return;
     }
@@ -290,22 +282,19 @@ export const GeneralAdminDashboard = () => {
       
       console.log('✅ [ADMIN GERAL] Resultado da exclusão:', result);
       
-      // Mostrar resultado detalhado
+      // Mostrar resultado simples
       if (result.deletedData) {
         const details = result.deletedData;
-        let message = `✅ Usuário "${details.user}" excluído com sucesso!\n\n`;
+        let message = `✅ Usuário "${details.user}" excluído com sucesso!`;
         
-        if (details.sessionsDeleted > 0) {
-          message += `• ${details.sessionsDeleted} sessões removidas\n`;
-        }
-        if (details.supervisionsDeleted > 0) {
-          message += `• ${details.supervisionsDeleted} supervisões removidas\n`;
-        }
-        if (details.patientsUnlinked > 0) {
-          message += `• ${details.patientsUnlinked} pacientes desvinculados\n`;
+        if (details.sessionsDeleted > 0 || details.supervisionsDeleted > 0 || details.patientsUnlinked > 0) {
+          message += `\n\n📊 Dados removidos:`;
+          if (details.sessionsDeleted > 0) message += `\n• ${details.sessionsDeleted} sessões`;
+          if (details.supervisionsDeleted > 0) message += `\n• ${details.supervisionsDeleted} supervisões`;
+          if (details.patientsUnlinked > 0) message += `\n• ${details.patientsUnlinked} pacientes desvinculados`;
         }
         
-        showOperationStatus('success', message, 5000);
+        showOperationStatus('success', message, 4000);
       } else {
         showOperationStatus('success', 'Usuário excluído com sucesso!');
       }
@@ -609,7 +598,7 @@ export const GeneralAdminDashboard = () => {
             </div>
           </div>
 
-          {/* ✅ FORMULÁRIO TOTALMENTE CORRIGIDO */}
+          {/* Formulário de Usuário */}
           {showUserForm && (
             <form onSubmit={handleSubmit} className="space-y-4 mb-6 p-6 bg-gray-50 rounded-lg border-2 border-purple-200">
               <div className="flex items-center justify-between">
@@ -627,7 +616,7 @@ export const GeneralAdminDashboard = () => {
                 </Button>
               </div>
               
-              {/* ✅ Exibir erro do formulário */}
+              {/* Exibir erro do formulário */}
               {formError && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                   <div className="flex items-start space-x-3">
@@ -730,7 +719,7 @@ export const GeneralAdminDashboard = () => {
                   </Select>
                 </div>
 
-                {/* ✅ Campo de valor por hora */}
+                {/* Campo de valor por hora */}
                 {(newUserForm.type.startsWith('at-') || newUserForm.type.startsWith('coordenacao-')) && (
                   <div>
                     <label className="block text-sm font-semibold text-purple-800 mb-2">
@@ -743,10 +732,8 @@ export const GeneralAdminDashboard = () => {
                       onChange={handleInputChange}
                       placeholder="35.00"
                       disabled={submittingForm}
-                      inputProps={{
-                        step: "0.01",
-                        min: "0"
-                      }}
+                      step="0.01"
+                      min="0"
                     />
                   </div>
                 )}
