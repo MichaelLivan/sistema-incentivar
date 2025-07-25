@@ -50,8 +50,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           console.log('🔄 [AUTH] Validando token com servidor...');
           
           // ✅ Primeiro testar conectividade
-          const connectionTest = await apiService.testConnection();
-          if (!connectionTest.success) {
+          const connectionTest = await apiService.testBasicConnectivity();
+          if (!connectionTest) {
             console.warn('⚠️ [AUTH] Servidor não acessível, mantendo estado local');
             setError('Servidor não está acessível. Verifique se o backend está rodando.');
             setUser(null);
