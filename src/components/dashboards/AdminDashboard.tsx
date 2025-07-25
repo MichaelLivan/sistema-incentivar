@@ -7,7 +7,7 @@ import { Footer } from '../ui/Footer';
 import { Table, TableBody, TableCell, TableHeader, TableRow, TableHeadCell } from '../ui/Table';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
-import { UserPlus, Users, Calendar, AlertTriangle, CheckCircle, X, Edit2, Trash2, Plus, Clock, Search } from 'lucide-react';
+import { UserPlus, Users, Calendar, AlertTriangle, CheckCircle, X, Edit2, Trash2, Plus, Clock, Search, RefreshCw } from 'lucide-react';
 import { formatHours, parseTimeToHours, hoursToTimeInput, formatDateBR, sumHoursSafely, calculateHours } from '../../utils/formatters';
 
 interface NewATForm {
@@ -33,7 +33,6 @@ interface NewPatientForm {
   assignedATId: string;
 }
 
-// Função para garantir precisão nas horas das sessões
 const formatSessionHours = (hours: number | string): string => {
   const numHours = typeof hours === 'string' ? parseFloat(hours) : hours;
   
@@ -74,7 +73,7 @@ export const AdminDashboard: React.FC = () => {
   const [sessions, setSessions] = useState<any[]>([]);
   const [ats, setAts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('confirmacao'); // 'confirmacao', 'ats', 'pacientes', 'atendimentos'
+  const [activeTab, setActiveTab] = useState('confirmacao');
   
   // Estados para busca e filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -83,11 +82,14 @@ export const AdminDashboard: React.FC = () => {
   
   // Estados para confirmação
   const [confirmingSession, setConfirmingSession] = useState<string | null>(null);
+  const [rejectingSession, setRejectingSession] = useState<string | null>(null);
   
+  // Estados para formulários
   const [showATForm, setShowATForm] = useState(false);
   const [showPatientForm, setShowPatientForm] = useState(false);
   const [editingAT, setEditingAT] = useState<string | null>(null);
   const [editingPatient, setEditingPatient] = useState<string | null>(null);
+  const [operationStatus, setOperationStatus] = useState<{type: 'success' | 'error', message: string} | null>(null);
 
   const [newATForm, setNewATForm] = useState<NewATForm>({
     name: '',
@@ -112,21 +114,70 @@ export const AdminDashboard: React.FC = () => {
     assignedATId: ''
   });
 
+  // Verificação de acesso melhorada
+  const isAdminSetorial = user?.type?.startsWith('adm-') && user?.type !== 'adm-geral';
+  const isAdminGeral = user?.type === 'adm-geral';
+  const hasAdminAccess = isAdminSetorial || isAdminGeral;
+
+  if (!hasAdminAccess) {
+    return (
+      <div className="container mx-auto px-4 py-6">
+        <Card>
+          <CardContent className="text-center py-8">
+            <div className="mb-4">
+              <div className="mx-auto w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-600" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold text-red-600 mb-4">Acesso Negado</h2>
+            <p className="text-gray-600 mb-2">Esta página é restrita aos administradores.</p>
+            <div className="bg-gray-50 p-4 rounded-lg mb-4">
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Usuário atual:</strong> {user?.name || 'Não identificado'}
+              </p>
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Email:</strong> {user?.email || 'Não identificado'}
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Tipo:</strong> <code className="bg-red-100 px-2 py-1 rounded">{user?.type || 'Não definido'}</code>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Função para mostrar status das operações
+  const showOperationStatus = (type: 'success' | 'error', message: string, duration = 4000) => {
+    setOperationStatus({ type, message });
+    setTimeout(() => setOperationStatus(null), duration);
+  };
+
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
+        console.log('🔄 [ADMIN] Carregando dados...');
+        
         const [patientsData, sessionsData, atsData] = await Promise.all([
           apiService.getPatients(),
           apiService.getSessions({ month: selectedMonth, year: selectedYear }),
           apiService.getATs()
         ]);
         
-        setPatients(patientsData);
-        setSessions(sessionsData);
-        setAts(atsData);
+        console.log('📊 [ADMIN] Dados carregados:', {
+          patients: patientsData?.length || 0,
+          sessions: sessionsData?.length || 0,
+          ats: atsData?.length || 0
+        });
+        
+        setPatients(patientsData || []);
+        setSessions(sessionsData || []);
+        setAts(atsData || []);
       } catch (error) {
-        console.error('Erro ao carregar dados:', error);
+        console.error('❌ [ADMIN] Erro ao carregar dados:', error);
+        showOperationStatus('error', 'Erro ao carregar dados: ' + (error instanceof Error ? error.message : 'Erro desconhecido'));
       } finally {
         setLoading(false);
       }
@@ -135,14 +186,34 @@ export const AdminDashboard: React.FC = () => {
     loadData();
   }, [selectedMonth, selectedYear]);
 
+  // Função de recarregamento de dados
+  const reloadData = async () => {
+    try {
+      console.log('🔄 [ADMIN] Recarregando dados...');
+      const [patientsData, sessionsData, atsData] = await Promise.all([
+        apiService.getPatients(),
+        apiService.getSessions({ month: selectedMonth, year: selectedYear }),
+        apiService.getATs()
+      ]);
+      
+      setPatients(patientsData || []);
+      setSessions(sessionsData || []);
+      setAts(atsData || []);
+      showOperationStatus('success', 'Dados atualizados com sucesso!');
+    } catch (error) {
+      console.error('❌ [ADMIN] Erro ao recarregar:', error);
+      showOperationStatus('error', 'Erro ao recarregar dados');
+    }
+  };
+
   const userSector = user?.sector;
   const sectorSessions = sessions.filter(s => {
     const patient = patients.find(p => p.id === s.patient_id);
-    return patient?.sector === userSector;
+    return isAdminGeral || patient?.sector === userSector;
   });
 
-  const sectorPatients = patients.filter(p => p.sector === userSector);
-  const sectorAts = ats.filter(a => a.sector === userSector);
+  const sectorPatients = patients.filter(p => isAdminGeral || p.sector === userSector);
+  const sectorAts = ats.filter(a => isAdminGeral || a.sector === userSector);
 
   // Filtrar sessões baseado na pesquisa
   const filteredSessions = sectorSessions.filter(session => {
@@ -156,11 +227,11 @@ export const AdminDashboard: React.FC = () => {
     );
   });
 
-  // ✅ FUNÇÃO DE CONFIRMAÇÃO SIMPLIFICADA E CORRIGIDA
+  // ✅ FUNÇÃO DE CONFIRMAÇÃO CORRIGIDA E MELHORADA
   const handleConfirmSession = async (sessionId: string) => {
     // Prevenir múltiplas confirmações simultâneas
-    if (confirmingSession) {
-      console.log('⚠️ Já confirmando outra sessão, aguarde...');
+    if (confirmingSession || rejectingSession) {
+      console.log('⚠️ [ADMIN] Já processando outra sessão, aguarde...');
       return;
     }
 
@@ -168,53 +239,43 @@ export const AdminDashboard: React.FC = () => {
       setConfirmingSession(sessionId);
       console.log('✅ [ADMIN] Iniciando confirmação da sessão:', sessionId);
       
-      // Buscar dados da sessão para logs
+      // Buscar dados da sessão para logs e validação
       const sessionToConfirm = sessions.find(s => s.id === sessionId);
       if (!sessionToConfirm) {
-        throw new Error('Sessão não encontrada');
+        throw new Error('Sessão não encontrada na lista local');
       }
 
       if (sessionToConfirm.is_confirmed) {
-        alert('⚠️ Esta sessão já foi confirmada!');
+        showOperationStatus('error', '⚠️ Esta sessão já foi confirmada!');
         return;
       }
 
-      console.log('🔍 Confirmando sessão:', {
+      console.log('🔍 [ADMIN] Confirmando sessão:', {
         id: sessionToConfirm.id,
         patient_id: sessionToConfirm.patient_id,
         at_id: sessionToConfirm.at_id,
-        date: sessionToConfirm.date
+        date: sessionToConfirm.date,
+        start_time: sessionToConfirm.start_time,
+        end_time: sessionToConfirm.end_time
       });
       
       // Chamar API de confirmação
       const response = await apiService.confirmSession(sessionId);
-      console.log('📥 Resposta da confirmação:', response);
+      console.log('📥 [ADMIN] Resposta da confirmação:', response);
       
       // ✅ RECARREGAR DADOS IMEDIATAMENTE APÓS CONFIRMAÇÃO
-      console.log('🔄 Recarregando dados após confirmação...');
-      const [updatedSessions, updatedPatients] = await Promise.all([
-        apiService.getSessions({ month: selectedMonth, year: selectedYear }),
-        apiService.getPatients()
-      ]);
-      
-      // Atualizar estados
-      setSessions(updatedSessions);
-      setPatients(updatedPatients);
+      console.log('🔄 [ADMIN] Recarregando dados após confirmação...');
+      await reloadData();
       
       // Verificar se a confirmação foi bem-sucedida
-      const updatedSession = updatedSessions.find(s => s.id === sessionId);
-      if (updatedSession && updatedSession.is_confirmed) {
-        const patient = updatedPatients.find(p => p.id === updatedSession.patient_id);
-        const patientName = patient?.name || 'Paciente';
-        
-        console.log('✅ Confirmação bem-sucedida!');
-        alert(`✅ Atendimento de ${patientName} confirmado com sucesso!\n\n📱 Agora está visível para os pais no painel deles.`);
-      } else {
-        throw new Error('Confirmação não foi aplicada corretamente');
-      }
+      const patient = patients.find(p => p.id === sessionToConfirm.patient_id);
+      const patientName = patient?.name || 'Paciente não identificado';
+      
+      console.log('✅ [ADMIN] Confirmação bem-sucedida!');
+      showOperationStatus('success', `✅ Atendimento de ${patientName} confirmado com sucesso!\n\n📱 Agora está visível para os pais no painel deles.`);
       
     } catch (error) {
-      console.error('❌ Erro ao confirmar sessão:', error);
+      console.error('❌ [ADMIN] Erro ao confirmar sessão:', error);
       
       let errorMessage = 'Erro ao confirmar atendimento';
       if (error instanceof Error) {
@@ -226,23 +287,20 @@ export const AdminDashboard: React.FC = () => {
           errorMessage = '❌ Sessão expirada. Faça login novamente';
         } else if (error.message.includes('500')) {
           errorMessage = '❌ Erro no servidor. Contate o suporte técnico';
+        } else if (error.message.includes('Failed to fetch') || error.message.includes('ERR_CONNECTION_REFUSED')) {
+          errorMessage = '❌ Não foi possível conectar ao servidor. Verifique se o backend está rodando';
         } else {
           errorMessage = `❌ ${error.message}`;
         }
       }
       
-      alert(errorMessage);
+      showOperationStatus('error', errorMessage);
       
       // Tentar recarregar dados mesmo com erro
       try {
-        const [sessionsData, patientsData] = await Promise.all([
-          apiService.getSessions({ month: selectedMonth, year: selectedYear }),
-          apiService.getPatients()
-        ]);
-        setSessions(sessionsData);
-        setPatients(patientsData);
+        await reloadData();
       } catch (reloadError) {
-        console.error('❌ Erro ao recarregar dados:', reloadError);
+        console.error('❌ [ADMIN] Erro ao recarregar dados:', reloadError);
       }
     } finally {
       setConfirmingSession(null);
@@ -255,29 +313,28 @@ export const AdminDashboard: React.FC = () => {
     const patient = patients.find(p => p.id === sessionToReject?.patient_id);
     const patientName = patient?.name || 'Paciente não identificado';
     
-    if (window.confirm(`❓ Tem certeza que deseja rejeitar o atendimento de ${patientName}?\n\n⚠️ Esta ação irá EXCLUIR permanentemente o atendimento do sistema e não pode ser desfeita.`)) {
-      try {
-        console.log('🗑️ [ADMIN] Rejeitando (deletando) sessão:', sessionId);
-        
-        await apiService.deleteSession(sessionId);
-        
-        // Recarregar dados
-        console.log('🔄 Recarregando dados após rejeição...');
-        const [updatedSessions, updatedPatients] = await Promise.all([
-          apiService.getSessions({ month: selectedMonth, year: selectedYear }),
-          apiService.getPatients()
-        ]);
-        
-        setSessions(updatedSessions);
-        setPatients(updatedPatients);
-        
-        console.log('✅ Atendimento rejeitado com sucesso');
-        alert(`✅ Atendimento de ${patientName} rejeitado e removido do sistema.`);
-        
-      } catch (error) {
-        console.error('❌ Erro ao rejeitar sessão:', error);
-        alert('❌ Erro ao rejeitar atendimento. Tente novamente.');
-      }
+    if (!window.confirm(`❓ Tem certeza que deseja rejeitar o atendimento de ${patientName}?\n\n⚠️ Esta ação irá EXCLUIR permanentemente o atendimento do sistema e não pode ser desfeita.`)) {
+      return;
+    }
+
+    try {
+      setRejectingSession(sessionId);
+      console.log('🗑️ [ADMIN] Rejeitando (deletando) sessão:', sessionId);
+      
+      await apiService.deleteSession(sessionId);
+      
+      // Recarregar dados
+      console.log('🔄 [ADMIN] Recarregando dados após rejeição...');
+      await reloadData();
+      
+      console.log('✅ [ADMIN] Atendimento rejeitado com sucesso');
+      showOperationStatus('success', `✅ Atendimento de ${patientName} rejeitado e removido do sistema.`);
+      
+    } catch (error) {
+      console.error('❌ [ADMIN] Erro ao rejeitar sessão:', error);
+      showOperationStatus('error', 'Erro ao rejeitar atendimento. Tente novamente.');
+    } finally {
+      setRejectingSession(null);
     }
   };
 
@@ -299,7 +356,7 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     
     if (!newATForm.name || !newATForm.email) {
-      alert('Por favor, preencha todos os campos obrigatórios');
+      showOperationStatus('error', 'Por favor, preencha todos os campos obrigatórios');
       return;
     }
 
@@ -320,12 +377,7 @@ export const AdminDashboard: React.FC = () => {
         });
       }
       
-      const [patientsData, atsData] = await Promise.all([
-        apiService.getPatients(),
-        apiService.getATs()
-      ]);
-      setPatients(patientsData);
-      setAts(atsData);
+      await reloadData();
       
       setNewATForm({
         name: '',
@@ -337,12 +389,12 @@ export const AdminDashboard: React.FC = () => {
       setEditingAT(null);
       setShowATForm(false);
       
-      alert(`AT ${editingAT ? 'atualizado' : 'cadastrado'} com sucesso!`);
+      showOperationStatus('success', `AT ${editingAT ? 'atualizado' : 'cadastrado'} com sucesso!`);
       
     } catch (error) {
-      console.error(`Erro ao ${editingAT ? 'atualizar' : 'criar'} AT:`, error);
+      console.error(`❌ [ADMIN] Erro ao ${editingAT ? 'atualizar' : 'criar'} AT:`, error);
       const errorMessage = (error instanceof Error) ? error.message : String(error);
-      alert(`Erro ao ${editingAT ? 'atualizar' : 'cadastrar'} AT: ${errorMessage}`);
+      showOperationStatus('error', `Erro ao ${editingAT ? 'atualizar' : 'cadastrar'} AT: ${errorMessage}`);
     }
   };
 
@@ -368,7 +420,7 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
 
     if (!newPatientForm.name || !newPatientForm.parentEmail) {
-      alert('Por favor, preencha todos os campos obrigatórios');
+      showOperationStatus('error', 'Por favor, preencha todos os campos obrigatórios');
       return;
     }
 
@@ -393,8 +445,7 @@ export const AdminDashboard: React.FC = () => {
         await apiService.createPatient(patientData);
       }
 
-      const patientsData = await apiService.getPatients();
-      setPatients(patientsData);
+      await reloadData();
 
       setNewPatientForm({
         name: '',
@@ -412,11 +463,11 @@ export const AdminDashboard: React.FC = () => {
       });
       setEditingPatient(null);
       setShowPatientForm(false);
-      alert(`Paciente ${editingPatient ? 'atualizado' : 'cadastrado'} com sucesso!`);
+      showOperationStatus('success', `Paciente ${editingPatient ? 'atualizado' : 'cadastrado'} com sucesso!`);
     } catch (error) {
-      console.error(`Erro ao ${editingPatient ? 'atualizar' : 'criar'} paciente:`, error);
+      console.error(`❌ [ADMIN] Erro ao ${editingPatient ? 'atualizar' : 'criar'} paciente:`, error);
       const errorMessage = (error instanceof Error) ? error.message : String(error);
-      alert(`Erro ao ${editingPatient ? 'atualizar' : 'cadastrar'} paciente: ${errorMessage}`);
+      showOperationStatus('error', `Erro ao ${editingPatient ? 'atualizar' : 'cadastrar'} paciente: ${errorMessage}`);
     }
   };
 
@@ -427,16 +478,11 @@ export const AdminDashboard: React.FC = () => {
     if (window.confirm(`Tem certeza que deseja excluir o AT "${atToDelete.name}"?`)) {
       try {
         await apiService.deleteUser(atId);
-        const [patientsData, atsData] = await Promise.all([
-          apiService.getPatients(),
-          apiService.getATs()
-        ]);
-        setPatients(patientsData);
-        setAts(atsData);
-        alert('AT excluído com sucesso!');
+        await reloadData();
+        showOperationStatus('success', 'AT excluído com sucesso!');
       } catch (error) {
-        console.error('Erro ao excluir AT:', error);
-        alert('Erro ao excluir AT.');
+        console.error('❌ [ADMIN] Erro ao excluir AT:', error);
+        showOperationStatus('error', 'Erro ao excluir AT.');
       }
     }
   };
@@ -485,12 +531,11 @@ export const AdminDashboard: React.FC = () => {
     if (window.confirm(`Tem certeza que deseja excluir o paciente "${patientToDelete.name}"?`)) {
       try {
         await apiService.deletePatient(patientId);
-        const patientsData = await apiService.getPatients();
-        setPatients(patientsData);
-        alert('Paciente excluído com sucesso!');
+        await reloadData();
+        showOperationStatus('success', 'Paciente excluído com sucesso!');
       } catch (error) {
-        console.error('Erro ao excluir paciente:', error);
-        alert('Erro ao excluir paciente.');
+        console.error('❌ [ADMIN] Erro ao excluir paciente:', error);
+        showOperationStatus('error', 'Erro ao excluir paciente.');
       }
     }
   };
@@ -498,22 +543,22 @@ export const AdminDashboard: React.FC = () => {
   const handleApproveSession = async (sessionId: string) => {
     try {
       await apiService.approveSession(sessionId);
-      const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
-      setSessions(sessionsData);
+      await reloadData();
+      showOperationStatus('success', 'Atendimento aprovado com sucesso!');
     } catch (error) {
-      console.error('Erro ao aprovar sessão:', error);
-      alert('Erro ao aprovar sessão');
+      console.error('❌ [ADMIN] Erro ao aprovar sessão:', error);
+      showOperationStatus('error', 'Erro ao aprovar sessão');
     }
   };
 
   const handleLaunchSession = async (sessionId: string) => {
     try {
       await apiService.launchSession(sessionId);
-      const sessionsData = await apiService.getSessions({ month: selectedMonth, year: selectedYear });
-      setSessions(sessionsData);
+      await reloadData();
+      showOperationStatus('success', 'Atendimento lançado com sucesso!');
     } catch (error) {
-      console.error('Erro ao lançar sessão:', error);
-      alert('Erro ao lançar sessão');
+      console.error('❌ [ADMIN] Erro ao lançar sessão:', error);
+      showOperationStatus('error', 'Erro ao lançar sessão');
     }
   };
 
@@ -570,13 +615,58 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6">
+      {/* Status das Operações */}
+      {operationStatus && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${
+          operationStatus.type === 'success' 
+            ? 'bg-green-50 border border-green-200' 
+            : 'bg-red-50 border border-red-200'
+        }`}>
+          <div className="flex items-start space-x-3">
+            {operationStatus.type === 'success' ? (
+              <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+            )}
+            <div>
+              <p className={`font-medium text-sm ${
+                operationStatus.type === 'success' ? 'text-green-800' : 'text-red-800'
+              }`}>
+                {operationStatus.type === 'success' ? 'Sucesso!' : 'Erro!'}
+              </p>
+              <p className={`text-sm whitespace-pre-line ${
+                operationStatus.type === 'success' ? 'text-green-700' : 'text-red-700'
+              }`}>
+                {operationStatus.message}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cabeçalho */}
       <Card>
         <CardHeader>
-          <CardTitle>Administração {userSector?.toUpperCase()} - Recepção</CardTitle>
-          <p className="text-gray-600">
-            Gerencie atendimentos, ATs e pacientes do setor {userSector?.toUpperCase()}.
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>
+                Administração {userSector?.toUpperCase()} - Recepção
+                {isAdminGeral && <span className="text-sm font-normal text-purple-600 ml-2">(Admin Geral)</span>}
+              </CardTitle>
+              <p className="text-gray-600">
+                Gerencie atendimentos, ATs e pacientes {isAdminGeral ? 'de todos os setores' : `do setor ${userSector?.toUpperCase()}`}.
+              </p>
+            </div>
+            <Button 
+              onClick={reloadData}
+              variant="secondary"
+              size="sm"
+              disabled={loading}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
+          </div>
         </CardHeader>
       </Card>
 
@@ -689,7 +779,7 @@ export const AdminDashboard: React.FC = () => {
               className="flex items-center space-x-2"
             >
               <CheckCircle className="w-4 h-4" />
-              <span>Confirmar Atendimentos</span>
+              <span>Confirmar Atendimentos ({pendingSessions.length})</span>
             </Button>
             <Button
               onClick={() => setActiveTab('ats')}
@@ -755,7 +845,7 @@ export const AdminDashboard: React.FC = () => {
         </Card>
       )}
 
-      {/* ABA: Confirmar Atendimentos - CORRIGIDA */}
+      {/* ABA: Confirmar Atendimentos - CORRIGIDA PARA ADMIN SETORIAL */}
       {activeTab === 'confirmacao' && (
         <Card>
           <CardHeader>
@@ -781,7 +871,7 @@ export const AdminDashboard: React.FC = () => {
                   {pendingSessions.length} atendimento(s) aguardando confirmação
                 </span>
               </div>
-              {pendingSessions.length > 0 && (
+              {pendingSessions.length > 0 && hasAdminAccess && (
                 <p className="text-xs text-yellow-700 mt-1">
                   Confirme os atendimentos para que os pais possam visualizá-los no sistema.
                 </p>
@@ -806,6 +896,8 @@ export const AdminDashboard: React.FC = () => {
                   const at = ats.find(a => a.id === session.at_id);
                   const hours = calculateHours(session.start_time, session.end_time);
                   const isConfirming = confirmingSession === session.id;
+                  const isRejecting = rejectingSession === session.id;
+                  const isProcessing = isConfirming || isRejecting;
 
                   return (
                     <TableRow key={session.id} className="hover:bg-yellow-50">
@@ -841,7 +933,7 @@ export const AdminDashboard: React.FC = () => {
                             size="sm"
                             variant="success"
                             onClick={() => handleConfirmSession(session.id)}
-                            disabled={isConfirming}
+                            disabled={isProcessing}
                             title="✅ Confirmar atendimento - Ficará visível para os pais"
                             className="bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
                           >
@@ -861,12 +953,21 @@ export const AdminDashboard: React.FC = () => {
                             size="sm"
                             variant="danger"
                             onClick={() => handleRejectSession(session.id)}
-                            disabled={isConfirming}
+                            disabled={isProcessing}
                             title="❌ Rejeitar atendimento - Será removido do sistema"
                             className="bg-red-600 hover:bg-red-700 text-white disabled:opacity-50"
                           >
-                            <X size={14} className="mr-1" />
-                            Rejeitar
+                            {isRejecting ? (
+                              <div className="flex items-center space-x-1">
+                                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                <span>Rejeitando...</span>
+                              </div>
+                            ) : (
+                              <>
+                                <X size={14} className="mr-1" />
+                                Rejeitar
+                              </>
+                            )}
                           </Button>
                         </div>
                       </TableCell>
@@ -1044,7 +1145,7 @@ export const AdminDashboard: React.FC = () => {
         </Card>
       )}
 
-      {/* ABA: Gerenciar Pacientes - LAYOUT MELHORADO */}
+      {/* ABA: Gerenciar Pacientes */}
       {activeTab === 'pacientes' && (
         <Card>
           <CardHeader>
