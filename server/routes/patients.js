@@ -170,15 +170,18 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // ✅ MESMA LÓGICA PARA O SEGUNDO RESPONSÁVEL (se fornecido)
+    let existingParent2 = null;
     if (parent_email2) {
       console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 2:', parent_email2);
       
-      const { data: existingParent2 } = await supabase
+      const { data: existingParent2Data } = await supabase
         .from('users')
         .select('id')
         .eq('email', parent_email2)
         .eq('type', 'pais')
         .maybeSingle();
+      
+      existingParent2 = existingParent2Data;
 
       // Se não existe usuário "pais" com este email, criar automaticamente
       if (!existingParent2) {
