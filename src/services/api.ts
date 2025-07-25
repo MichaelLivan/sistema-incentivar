@@ -110,6 +110,49 @@ class ApiService {
     return responseData;
   }
 
+  // FUNÇÃO DE LOGIN
+  async login(email, password) {
+    console.log('🔐 [API] Fazendo login:', email);
+    
+    try {
+      if (!email?.trim()) {
+        throw new Error('Email é obrigatório');
+      }
+      
+      if (!password?.trim()) {
+        throw new Error('Senha é obrigatória');
+      }
+      
+      const response = await fetch(`${this.baseURL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
+      
+      const result = await this.handleResponse(response, ' LOGIN');
+      
+      // Armazenar token se o login foi bem-sucedido
+      if (result.token) {
+        localStorage.setItem('authToken', result.token);
+        console.log('✅ [API] Token armazenado com sucesso');
+      }
+      
+      return result;
+      
+    } catch (error) {
+      console.error('❌ [API] Erro no login:', error);
+      
+      if (error.message.includes('Failed to fetch')) {
+        throw new Error('Não foi possível conectar ao servidor. Verifique se o backend está rodando');
+      }
+      
+      throw error;
+    }
+  }
+
   // FUNÇÃO MELHORADA PARA CRIAR USUÁRIO
   async createUser(userData) {
     console.log('📤 [API] Criando usuário:', { ...userData, password: '***' });
