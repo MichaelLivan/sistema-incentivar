@@ -1,16 +1,27 @@
-// ✅ ARQUIVO SESSIONS.JS COMPLETO E CORRIGIDO - ROTAS PARA ATENDIMENTOS
+// ✅ CORREÇÃO COMPLETA DAS ROTAS DE SESSÕES
+// Corrige problemas de confirmação para administradores setoriais
+
 import express from 'express';
 import supabase from '../config/supabase.js';
-import { authenticateToken } from '../middleware/auth.js';
+import { authenticateToken, debugPermissions } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// ✅ MIDDLEWARE DE DEBUG (apenas em desenvolvimento)
+if (process.env.NODE_ENV === 'development') {
+  router.use(debugPermissions);
+}
 
 // ✅ LISTAR SESSÕES/ATENDIMENTOS
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { month, year, patient_id, at_id } = req.query;
     
-    console.log('🔍 [SESSIONS] Carregando sessões para usuário:', req.user.type);
+    console.log('🔍 [SESSIONS] Carregando sessões para usuário:', {
+      type: req.user.type,
+      sector: req.user.sector,
+      filters: { month, year, patient_id, at_id }
+    });
     
     let query = supabase
       .from('sessions')
@@ -61,16 +72,23 @@ router.get('/', authenticateToken, async (req, res) => {
       }
 
       query = query.in('patient_id', myChildrenIds);
-    } else if (req.user.sector && req.user.type !== 'adm-geral') {
-      // Usuários setoriais veem sessões do seu setor
+    } else if (req.user.type !== 'adm-geral' && req.user.sector) {
+      // ✅ CORREÇÃO: Usuários setoriais veem sessões do seu setor
+      console.log('🏢 [SESSIONS] Filtrando por setor:', req.user.sector);
+      
       const { data: sectorPatients } = await supabase
         .from('patients')
         .select('id')
         .eq('sector', req.user.sector);
       
       const patientIds = sectorPatients?.map(p => p.id) || [];
+      console.log('📊 [SESSIONS] Pacientes do setor encontrados:', patientIds.length);
+      
       if (patientIds.length > 0) {
         query = query.in('patient_id', patientIds);
+      } else {
+        // Se não há pacientes no setor, retornar lista vazia
+        return res.json([]);
       }
     }
     // Admin geral vê todas
@@ -97,7 +115,7 @@ router.get('/', authenticateToken, async (req, res) => {
       return res.status(500).json({ message: 'Erro ao buscar sessões' });
     }
 
-    console.log(`✅ [SESSIONS] ${sessions?.length || 0} sessões encontradas`);
+    console.log(`✅ [SESSIONS] ${sessions?.length || 0} sessões encontradas para ${req.user.type}`);
     res.json(sessions || []);
 
   } catch (error) {
@@ -247,55 +265,143 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ CONFIRMAR SESSÃO (RECEPÇÃO) - FUNÇÃO PRINCIPAL CORRIGIDA
+// ✅ CONFIRMAR SESSÃO - FUNÇÃO PRINCIPAL COMPLETAMENTE CORRIGIDA
 router.patch('/:id/confirm', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('✅ [SESSIONS] Confirmando sessão:', id, 'por usuário:', req.user.name, 'tipo:', req.user.type);
+    console.log('✅ [SESSIONS] Iniciando confirmação de sessão:', {
+      sessionId: id,
+      user: {
+        id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        type: req.user.type,
+        sector: req.user.sector
+      },
+      route: {
+        method: req.method,
+        path: req.path
+      }
+    });
 
-    // ✅ CORREÇÃO PRINCIPAL: Verificar permissão melhorada
-    const canConfirm = req.user.type === 'adm-geral' || 
-                      req.user.type.startsWith('adm-') ||
-                      req.user.type.startsWith('coordenacao-') ||
-                      req.user.type.startsWith('financeiro-');
+    // ✅ CORREÇÃO PRINCIPAL: Verificação de permissão mais robusta
+    const allowedTypes = [
+      'adm-geral',
+      'adm-aba',
+      'adm-denver', 
+      'adm-grupo',
+      'adm-escolar',
+      'coordenacao-aba',
+      'coordenacao-denver',
+      'coordenacao-grupo', 
+      'coordenacao-escolar',
+      'financeiro-ats',
+      'financeiro-pct'
+    ];
+
+    const canConfirm = allowedTypes.includes(req.user.type);
+    
+    console.log('🔍 [SESSIONS] Verificando permissão para confirmação:', {
+      userType: req.user.type,
+      allowedTypes,
+      canConfirm,
+      isAdminGeral: req.user.type === 'adm-geral',
+      isAdminSetorial: req.user.type.startsWith('adm-') && req.user.type !== 'adm-geral'
+    });
 
     if (!canConfirm) {
-      console.log('❌ [SESSIONS] Acesso negado para tipo:', req.user.type);
-      return res.status(403).json({ 
-        message: 'Apenas administradores podem confirmar atendimentos',
+      console.log('❌ [SESSIONS] Acesso negado para confirmação:', {
         userType: req.user.type,
-        allowedTypes: ['adm-geral', 'adm-*', 'coordenacao-*', 'financeiro-*']
+        allowedTypes,
+        sector: req.user.sector
+      });
+      return res.status(403).json({ 
+        message: 'Você não tem permissão para confirmar atendimentos',
+        userType: req.user.type,
+        allowedTypes: allowedTypes,
+        details: 'Apenas administradores podem confirmar atendimentos'
       });
     }
 
-    console.log('✅ [SESSIONS] Permissão confirmada para:', req.user.type);
+    console.log('✅ [SESSIONS] Permissão confirmada para confirmação');
 
     // ✅ VERIFICAR SE SESSÃO EXISTE
+    console.log('🔍 [SESSIONS] Buscando sessão no banco...');
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
-      .select('*')
+      .select(`
+        *,
+        patient:patients!sessions_patient_id_fkey(id, name, sector),
+        at:users!sessions_at_id_fkey(id, name, sector)
+      `)
       .eq('id', id)
       .single();
 
     if (sessionError || !session) {
-      console.error('❌ [SESSIONS] Sessão não encontrada:', sessionError);
-      return res.status(404).json({ message: 'Atendimento não encontrado' });
+      console.error('❌ [SESSIONS] Sessão não encontrada:', {
+        sessionId: id,
+        error: sessionError
+      });
+      return res.status(404).json({ 
+        message: 'Atendimento não encontrado',
+        sessionId: id
+      });
     }
 
-    if (session.is_confirmed) {
-      console.log('⚠️ [SESSIONS] Sessão já confirmada:', id);
-      return res.status(400).json({ message: 'Atendimento já foi confirmado' });
-    }
-
-    console.log('🔍 [SESSIONS] Sessão encontrada, confirmando...', {
+    console.log('📋 [SESSIONS] Sessão encontrada:', {
       id: session.id,
       patient_id: session.patient_id,
+      patient_name: session.patient?.name,
+      patient_sector: session.patient?.sector,
       at_id: session.at_id,
-      date: session.date
+      at_name: session.at?.name,
+      date: session.date,
+      is_confirmed: session.is_confirmed,
+      is_substitution: session.is_substitution
     });
 
+    // ✅ VERIFICAR SE JÁ FOI CONFIRMADA
+    if (session.is_confirmed) {
+      console.log('⚠️ [SESSIONS] Sessão já confirmada:', id);
+      return res.status(400).json({ 
+        message: 'Atendimento já foi confirmado',
+        session: {
+          id: session.id,
+          confirmed_at: session.confirmed_at,
+          confirmed_by: session.confirmed_by
+        }
+      });
+    }
+
+    // ✅ VERIFICAR PERMISSÃO POR SETOR PARA ADMINS SETORIAIS
+    if (req.user.type !== 'adm-geral' && req.user.type.startsWith('adm-')) {
+      if (!req.user.sector) {
+        console.error('❌ [SESSIONS] Admin setorial sem setor definido:', req.user.type);
+        return res.status(403).json({
+          message: 'Admin setorial deve ter setor definido',
+          userType: req.user.type
+        });
+      }
+
+      if (session.patient?.sector !== req.user.sector) {
+        console.log('❌ [SESSIONS] Admin setorial tentando confirmar sessão de outro setor:', {
+          userSector: req.user.sector,
+          patientSector: session.patient?.sector,
+          sessionId: id
+        });
+        return res.status(403).json({
+          message: 'Você só pode confirmar atendimentos do seu setor',
+          userSector: req.user.sector,
+          patientSector: session.patient?.sector
+        });
+      }
+    }
+
+    console.log('🔒 [SESSIONS] Verificações de permissão concluídas - prosseguindo com confirmação');
+
     // ✅ CONFIRMAR SESSÃO
+    console.log('💾 [SESSIONS] Atualizando sessão no banco...');
     const { data: confirmedSession, error: confirmError } = await supabase
       .from('sessions')
       .update({
@@ -304,18 +410,33 @@ router.patch('/:id/confirm', authenticateToken, async (req, res) => {
         confirmed_by: req.user.id
       })
       .eq('id', id)
-      .select()
+      .select(`
+        *,
+        patient:patients!sessions_patient_id_fkey(id, name, sector),
+        at:users!sessions_at_id_fkey(id, name, sector)
+      `)
       .single();
 
     if (confirmError) {
-      console.error('❌ [SESSIONS] Erro ao confirmar sessão:', confirmError);
+      console.error('❌ [SESSIONS] Erro ao confirmar sessão no banco:', confirmError);
       return res.status(500).json({ 
-        message: 'Erro ao confirmar atendimento',
-        error: confirmError.message 
+        message: 'Erro ao confirmar atendimento no banco de dados',
+        error: confirmError.message,
+        details: confirmError.details
       });
     }
 
-    console.log('✅ [SESSIONS] Sessão confirmada com sucesso por:', req.user.name, req.user.type);
+    console.log('✅ [SESSIONS] Sessão confirmada com sucesso:', {
+      id: confirmedSession.id,
+      confirmed_at: confirmedSession.confirmed_at,
+      confirmed_by: confirmedSession.confirmed_by,
+      confirmer: {
+        id: req.user.id,
+        name: req.user.name,
+        type: req.user.type,
+        sector: req.user.sector
+      }
+    });
     
     res.json({ 
       message: 'Atendimento confirmado com sucesso',
@@ -323,15 +444,18 @@ router.patch('/:id/confirm', authenticateToken, async (req, res) => {
       confirmedBy: {
         id: req.user.id,
         name: req.user.name,
-        type: req.user.type
-      }
+        type: req.user.type,
+        sector: req.user.sector
+      },
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     console.error('❌ [SESSIONS] Erro interno na confirmação:', error);
     res.status(500).json({ 
       message: 'Erro interno ao confirmar atendimento',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -538,5 +662,43 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Erro interno ao excluir atendimento' });
   }
 });
+
+// ✅ ENDPOINT DE DEBUG PARA VERIFICAR PERMISSÕES (apenas em desenvolvimento)
+if (process.env.NODE_ENV === 'development') {
+  router.get('/debug/permissions', authenticateToken, (req, res) => {
+    const allowedTypes = [
+      'adm-geral',
+      'adm-aba',
+      'adm-denver', 
+      'adm-grupo',
+      'adm-escolar',
+      'coordenacao-aba',
+      'coordenacao-denver',
+      'coordenacao-grupo', 
+      'coordenacao-escolar',
+      'financeiro-ats',
+      'financeiro-pct'
+    ];
+
+    const canConfirm = allowedTypes.includes(req.user.type);
+
+    res.json({
+      user: {
+        id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        type: req.user.type,
+        sector: req.user.sector
+      },
+      permissions: {
+        canConfirmSessions: canConfirm,
+        allowedTypes,
+        isAdminGeral: req.user.type === 'adm-geral',
+        isAdminSetorial: req.user.type.startsWith('adm-') && req.user.type !== 'adm-geral'
+      },
+      timestamp: new Date().toISOString()
+    });
+  });
+}
 
 export default router;
