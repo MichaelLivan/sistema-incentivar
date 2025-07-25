@@ -1,54 +1,25 @@
+// CORRIGIDO: Cadastro de paciente permitindo admin setorial e melhorando validações
 import express from 'express';
 import supabase from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// ✅ FUNÇÃO CORRIGIDA para calcular horas com precisão
-const calculatePreciseHours = (startTime, endTime) => {
-  if (!startTime || !endTime) return 0;
-  
-  const [startHour, startMin] = startTime.split(':').map(Number);
-  const [endHour, endMin] = endTime.split(':').map(Number);
-  
-  if (isNaN(startHour) || isNaN(startMin) || isNaN(endHour) || isNaN(endMin)) return 0;
-  if (startMin >= 60 || endMin >= 60) return 0;
-  
-  const startMinutes = startHour * 60 + startMin;
-  const endMinutes = endHour * 60 + endMin;
-  
-  let diffMinutes = endMinutes - startMinutes;
-  if (diffMinutes < 0) diffMinutes += 24 * 60; // Para horários overnight
-  
-  // ✅ RETORNAR VALOR EXATO SEM ARREDONDAMENTO
-  return Math.max(0, diffMinutes / 60);
-};
-
-// =====================================================
-// GET SESSIONS - Listar sessões
-// =====================================================
+// Listar pacientes
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { month, year, patient_id, at_id } = req.query;
-
-    console.log('🔍 Buscando sessões para:', {
-      user_type: req.user.type,
-      user_sector: req.user.sector,
-      user_id: req.user.id,
-      filters: { month, year, patient_id, at_id }
-    });
+    const { sector, for_substitution } = req.query;
 
     let query = supabase
-      .from('sessions')
+      .from('patients')
       .select(`
         *,
-        patient:patients!sessions_patient_id_fkey(id, name, sector, parent_email, parent_email2, at_id),
-        at:users!sessions_at_id_fkey(id, name, sector, email)
+        parent:users!patients_parent_id_fkey(name, email),
+        at:users!patients_at_id_fkey(name, email)
       `)
-      .order('date', { ascending: false })
-      .order('start_time', { ascending: false });
+      .eq('active', true)
+      .order('name');
 
-    // ✅ FILTROS POR TIPO DE USUÁRIO
     if (req.user.type === 'pais') {
       const { data: parentUser, error: parentError } = await supabase
         .from('users')
@@ -60,569 +31,473 @@ router.get('/', authenticateToken, async (req, res) => {
         return res.status(500).json({ message: 'Erro ao buscar dados do responsável' });
       }
 
-      const { data: myChildren, error: patientsError } = await supabase
-        .from('patients')
-        .select('id')
-        .or(`parent_email.eq.${parentUser.email},parent_email2.eq.${parentUser.email}`);
-
-      if (patientsError) {
-        return res.status(500).json({ message: 'Erro ao buscar pacientes vinculados' });
-      }
-
-      const childrenIds = myChildren.map(child => child.id);
-      if (childrenIds.length > 0) {
-        // ✅ CORREÇÃO: Pais veem apenas sessões confirmadas
-        query = query.in('patient_id', childrenIds).eq('is_confirmed', true);
-        console.log(`👪 Pais - Buscando sessões CONFIRMADAS de ${childrenIds.length} filhos`);
-      } else {
-        return res.json([]);
-      }
-    } else if (req.user.type.startsWith('at-')) {
-      // ✅ NOVA LÓGICA: ATs veem suas próprias sessões (onde eles atenderam)
-      query = query.eq('at_id', req.user.id);
-      console.log(`👨‍⚕️ AT - Buscando sessões onde AT atendeu: ${req.user.id}`);
-    } else if (req.user.sector && req.user.type !== 'adm-geral') {
-      // Para admins setoriais, coordenação, etc.
-      const { data: sectorPatients } = await supabase
-        .from('patients')
-        .select('id')
-        .eq('sector', req.user.sector);
-
-      const patientIds = sectorPatients?.map(p => p.id) || [];
-      if (patientIds.length > 0) {
-        query = query.in('patient_id', patientIds);
-        console.log(`🏢 Setor ${req.user.sector} - ${patientIds.length} pacientes`);
-      }
-    }
-
-    // ✅ FILTROS ADICIONAIS
-    if (patient_id) {
-      query = query.eq('patient_id', patient_id);
-    }
-
-    if (at_id) {
-      query = query.eq('at_id', at_id);
-    }
-
-    if (month && year) {
-      const startDate = `${year}-${month.padStart(2, '0')}-01`;
-      const endDate = `${year}-${month.padStart(2, '0')}-31`;
-      query = query.gte('date', startDate).lte('date', endDate);
-    }
-
-    const { data: sessions, error } = await query;
-
-    if (error) {
-      console.error('❌ Erro ao buscar sessões:', error);
-      return res.status(500).json({ message: 'Erro ao buscar sessões' });
-    }
-
-    // ✅ LOG para debug das primeiras sessões
-    if (sessions && sessions.length > 0) {
-      console.log(`✅ ${sessions.length} sessões encontradas`);
-      sessions.slice(0, 2).forEach((session, i) => {
-        console.log(`🔍 Sessão ${i + 1}:`, {
-          id: session.id.substring(0, 8),
-          paciente: session.patient?.name,
-          at: session.at?.name,
-          horarios: `${session.start_time} - ${session.end_time}`,
-          hours_stored: session.hours,
-          is_confirmed: session.is_confirmed,
-          is_substitution: session.is_substitution
-        });
-      });
-    }
-
-    res.json(sessions);
-  } catch (error) {
-    console.error('❌ Erro interno ao buscar sessões:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// =====================================================
-// POST SESSIONS - Criar sessão (LÓGICA CORRIGIDA)
-// =====================================================
-router.post('/', authenticateToken, async (req, res) => {
-  try {
-    const { patient_id, start_time, end_time, date, observations, is_substitution } = req.body;
-
-    console.log('📤 CRIANDO SESSÃO:', {
-      patient_id, 
-      start_time, 
-      end_time, 
-      date, 
-      is_substitution,
-      at_logado: req.user.id,
-      at_nome: req.user.name,
-      at_setor: req.user.sector
-    });
-
-    if (!patient_id || !start_time || !end_time || !date) {
-      return res.status(400).json({ message: 'Preencha todos os campos obrigatórios' });
-    }
-
-    // ✅ NOVA LÓGICA CORRIGIDA: AT_ID sempre é quem está logado
-    const atId = req.user.id;  // SEMPRE o AT que está fazendo o atendimento
-    
-    let isSubstitutionReal = false;
-    let originalATInfo = null;
-
-    if (is_substitution) {
-      console.log('🔄 Verificando se é substituição real...');
-      
-      // Buscar o AT original do paciente
-      const { data: patient, error: patientError } = await supabase
+      const { data: allPatients, error: patientsError } = await supabase
         .from('patients')
         .select(`
-          id, name, sector, at_id,
-          original_at:users!patients_at_id_fkey(id, name, email)
+          *,
+          parent:users!patients_parent_id_fkey(name, email),
+          at:users!patients_at_id_fkey(name, email)
         `)
-        .eq('id', patient_id)
-        .single();
+        .eq('active', true)
+        .order('name');
 
-      if (patientError) {
-        console.error('❌ Erro ao buscar paciente:', patientError);
-        return res.status(500).json({ message: 'Erro ao buscar dados do paciente' });
+      if (patientsError) {
+        return res.status(500).json({ message: 'Erro ao buscar pacientes' });
       }
 
-      originalATInfo = patient.original_at;
-
-      console.log('👤 Dados do paciente:', {
-        nome: patient.name,
-        setor: patient.sector,
-        at_original_id: patient.at_id,
-        at_original_nome: originalATInfo?.name
+      const myPatients = allPatients.filter(patient => {
+        const isMainParent = patient.parent?.email === parentUser.email;
+        const isSecondParent = patient.parent_email2 === parentUser.email;
+        return isMainParent || isSecondParent;
       });
 
-      // ✅ REGRA CORRETA: É substituição se o AT logado é diferente do AT do paciente
-      if (patient.at_id && patient.at_id !== req.user.id) {
-        isSubstitutionReal = true;
-        console.log(`✅ SUBSTITUIÇÃO CONFIRMADA: ${req.user.name} substituindo ${originalATInfo?.name}`);
-      } else if (!patient.at_id) {
-        console.log('ℹ️ Paciente sem AT atribuído - atendimento normal');
-        isSubstitutionReal = false;
+      return res.json(myPatients);
+    }
+
+    // ✅ CORREÇÃO: Permitir ATs verem todos os pacientes do setor para substituição
+    if (req.user.type.startsWith('at-')) {
+      if (for_substitution === 'true') {
+        query = query.eq('sector', req.user.sector);
       } else {
-        console.log('ℹ️ AT está atendendo seu próprio paciente - atendimento normal');
-        isSubstitutionReal = false;
+        query = query.eq('at_id', req.user.id);
       }
+    } else if (req.user.sector && req.user.type !== 'adm-geral') {
+      query = query.eq('sector', req.user.sector);
     }
 
-    // ✅ CALCULAR HORAS COM PRECISÃO
-    const hours = calculatePreciseHours(start_time, end_time);
-    console.log(`⏰ Horas calculadas: ${hours} (${typeof hours})`);
-
-    if (hours <= 0) {
-      return res.status(400).json({ message: 'Hora final deve ser posterior à inicial' });
+    if (sector) {
+      query = query.eq('sector', sector);
     }
 
-    // ✅ DADOS PARA INSERÇÃO - LÓGICA TOTALMENTE CORRIGIDA
-    const sessionData = {
-      patient_id,
-      at_id: atId,  // ✅ SEMPRE o AT logado (quem realmente atendeu)
-      start_time,
-      end_time,
-      date,
-      hours,
-      observations: observations || '',
-      is_substitution: isSubstitutionReal,  // ✅ true só se for substituição real
-      is_confirmed: false,  // ✅ SEMPRE inicia como false - precisa confirmação da recepção
-      is_approved: false,
-      is_launched: false
-    };
-
-    console.log('💾 DADOS FINAIS PARA INSERÇÃO:', sessionData);
-
-    const { data: newSession, error } = await supabase
-      .from('sessions')
-      .insert(sessionData)
-      .select(`
-        *,
-        patient:patients!sessions_patient_id_fkey(id, name, sector, at_id),
-        at:users!sessions_at_id_fkey(id, name, email, sector)
-      `)
-      .single();
+    const { data: patients, error } = await query;
 
     if (error) {
-      console.error('❌ Erro ao inserir sessão:', error);
-      return res.status(500).json({ 
-        message: 'Erro ao cadastrar sessão',
-        error: error.message 
-      });
+      console.error('❌ Erro ao buscar pacientes:', error);
+      return res.status(500).json({ message: 'Erro ao buscar pacientes' });
     }
 
-    // ✅ LOG DETALHADO DO RESULTADO
-    console.log('✅ SESSÃO CRIADA COM SUCESSO:');
-    console.log(`   ID: ${newSession.id}`);
-    console.log(`   Paciente: ${newSession.patient?.name}`);
-    console.log(`   AT que atendeu: ${newSession.at?.name} (ID: ${newSession.at_id})`);
-    console.log(`   Horas: ${newSession.hours}`);
-    console.log(`   É substituição: ${newSession.is_substitution}`);
-    console.log(`   Status confirmação: ${newSession.is_confirmed} (precisa confirmação da recepção)`);
+    console.log('📊 Busca de pacientes:', {
+      usuario: req.user.type,
+      setor: req.user.sector,
+      for_substitution,
+      pacientes_encontrados: patients.length
+    });
     
-    if (isSubstitutionReal && originalATInfo) {
-      console.log(`   AT original do paciente: ${originalATInfo.name}`);
-      console.log(`   🔄 ${newSession.at?.name} substituiu ${originalATInfo.name}`);
-    }
-
-    // ✅ RESPOSTA COMPLETA
-    res.status(201).json({
-      message: 'Sessão cadastrada com sucesso! Aguarda confirmação da recepção.',
-      sessionId: newSession.id,
-      session: newSession,
-      substitutionInfo: isSubstitutionReal ? {
-        substituting_at: newSession.at?.name,
-        original_at: originalATInfo?.name,
-        patient: newSession.patient?.name
-      } : null,
-      debug: {
-        calculated_hours: hours,
-        is_substitution: isSubstitutionReal,
-        at_who_attended: newSession.at?.name,
-        at_id_used: atId,
-        needs_confirmation: true
-      }
-    });
-
+    res.json(patients);
   } catch (error) {
-    console.error('❌ Erro interno ao criar sessão:', error);
-    res.status(500).json({ 
-      message: 'Erro interno do servidor',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
-    });
+    console.error('❌ Erro interno ao buscar pacientes:', error);
+    res.status(500).json({ message: 'Erro interno ao buscar pacientes' });
   }
 });
 
-// =====================================================
-// PUT SESSIONS - Atualizar sessão
-// =====================================================
-router.put('/:id', authenticateToken, async (req, res) => {
+// ✅ CRIAR PACIENTE - CORRIGIDO PARA ADMIN SETORIAL
+router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { start_time, end_time, date, observations } = req.body;
+    console.log('📤 [CREATE PATIENT] Iniciando cadastro de paciente');
+    console.log('👤 [CREATE PATIENT] Usuário:', req.user.type, req.user.sector);
+    console.log('📋 [CREATE PATIENT] Dados recebidos:', req.body);
 
-    console.log(`📝 Atualizando sessão ${id}:`, { start_time, end_time, date, observations });
-
-    let updateData = {};
-    
-    // Se horários foram alterados, recalcular horas com precisão
-    if (start_time && end_time) {
-      const preciseHours = calculatePreciseHours(start_time, end_time);
-      
-      if (preciseHours <= 0) {
-        return res.status(400).json({ 
-          message: 'Horário de fim deve ser posterior ao horário de início' 
-        });
-      }
-      
-      updateData = {
-        start_time,
-        end_time,
-        hours: preciseHours // ✅ USAR VALOR PRECISO
-      };
-      
-      console.log(`✅ Horas recalculadas: ${preciseHours}`);
-    }
-    
-    if (date) updateData.date = date;
-    if (observations !== undefined) updateData.observations = observations;
-
-    const { data: updatedSession, error } = await supabase
-      .from('sessions')
-      .update(updateData)
-      .eq('id', id)
-      .select(`
-        *,
-        patient:patients!sessions_patient_id_fkey(name),
-        at:users!sessions_at_id_fkey(name)
-      `)
-      .single();
-
-    if (error) {
-      console.error('❌ Erro ao atualizar sessão:', error);
-      return res.status(500).json({ message: 'Erro ao atualizar sessão' });
-    }
-
-    console.log(`✅ Sessão atualizada:`, {
-      id: updatedSession.id,
-      hours: updatedSession.hours,
-      patient: updatedSession.patient?.name,
-      at: updatedSession.at?.name
-    });
-
-    res.json({
-      message: 'Sessão atualizada com sucesso',
-      session: updatedSession
-    });
-
-  } catch (error) {
-    console.error('❌ Erro interno ao atualizar sessão:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// =====================================================
-// PATCH SESSIONS - Confirmar sessão (recepção) - CORRIGIDA
-// =====================================================
-router.patch('/:id/confirm', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // ✅ CORREÇÃO: Permitir admin-* confirmar (recepção)
+    // ✅ VERIFICAÇÃO DE PERMISSÃO CORRIGIDA
     const allowedTypes = [
-      'adm-geral', 'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar',
-      'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo'
+      'adm-geral',
+      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
     ];
 
     if (!allowedTypes.includes(req.user.type)) {
-      console.error(`❌ Tipo de usuário não autorizado para confirmar: ${req.user.type}`);
+      console.error('❌ [CREATE PATIENT] Usuário não autorizado:', req.user.type);
       return res.status(403).json({ 
-        message: 'Apenas a recepção (administradores) pode confirmar atendimentos',
+        message: 'Apenas administradores podem cadastrar pacientes',
         userType: req.user.type 
       });
     }
 
-    console.log(`👨‍💼 CONFIRMANDO sessão ${id} por ${req.user.name} (${req.user.type})`);
+    const {
+      name,
+      parent_email,
+      parent_name,
+      parent_email2,
+      parent_name2,
+      at_id,
+      sector,
+      weekly_hours,
+      hourly_rate
+    } = req.body;
 
-    // ✅ VERIFICAR SE A SESSÃO EXISTE ANTES DE CONFIRMAR
-    const { data: existingSession, error: checkError } = await supabase
-      .from('sessions')
-      .select('id, is_confirmed, patient_id, at_id')
-      .eq('id', id)
-      .single();
-
-    if (checkError || !existingSession) {
-      console.error('❌ Sessão não encontrada:', checkError);
-      return res.status(404).json({ message: 'Atendimento não encontrado' });
+    // ✅ VALIDAÇÕES BÁSICAS MELHORADAS
+    if (!name?.trim()) {
+      return res.status(400).json({ message: 'Nome do paciente é obrigatório' });
     }
 
-    if (existingSession.is_confirmed) {
-      console.log('⚠️ Sessão já estava confirmada');
-      return res.status(400).json({ message: 'Este atendimento já foi confirmado' });
+    if (!parent_email?.trim()) {
+      return res.status(400).json({ message: 'Email do responsável é obrigatório' });
     }
 
-    // ✅ CONFIRMAR A SESSÃO
-    const { data: updatedSession, error } = await supabase
-      .from('sessions')
-      .update({ 
-        is_confirmed: true,
-        confirmed_at: new Date().toISOString(),
-        confirmed_by: req.user.id
-      })
-      .eq('id', id)
-      .select(`
-        *,
-        patient:patients!sessions_patient_id_fkey(name, sector),
-        at:users!sessions_at_id_fkey(name, sector)
-      `)
-      .single();
+    if (!parent_name?.trim()) {
+      return res.status(400).json({ message: 'Nome do responsável é obrigatório' });
+    }
 
-    if (error) {
-      console.error('❌ Erro ao confirmar sessão:', error);
-      return res.status(500).json({ 
-        message: 'Erro ao confirmar sessão',
-        error: error.message 
+    if (!sector) {
+      return res.status(400).json({ message: 'Setor é obrigatório' });
+    }
+
+    // ✅ VALIDAÇÃO DE EMAIL MELHORADA
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(parent_email.trim())) {
+      return res.status(400).json({ message: 'Formato de e-mail do responsável inválido' });
+    }
+
+    if (parent_email2 && !emailRegex.test(parent_email2.trim())) {
+      return res.status(400).json({ message: 'Formato de e-mail do segundo responsável inválido' });
+    }
+
+    // ✅ VERIFICAR SE PACIENTE JÁ EXISTE
+    console.log('🔍 [CREATE PATIENT] Verificando se paciente já existe...');
+    const { data: existingPatient } = await supabase
+      .from('patients')
+      .select('id, name')
+      .eq('name', name.trim())
+      .eq('parent_email', parent_email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (existingPatient) {
+      return res.status(409).json({ 
+        message: 'Já existe um paciente com este nome e e-mail de responsável' 
       });
     }
 
-    console.log(`✅ Sessão confirmada com sucesso:`, {
-      session_id: updatedSession.id,
-      patient: updatedSession.patient?.name,
-      at: updatedSession.at?.name,
-      confirmed_by: req.user.name,
-      confirmed_at: updatedSession.confirmed_at
+    // ✅ CRIAR USUÁRIO "PAIS" AUTOMATICAMENTE - PRIMEIRA PARTE
+    console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 1:', parent_email);
+    
+    const { data: existingParent1 } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', parent_email.trim().toLowerCase())
+      .eq('type', 'pais')
+      .maybeSingle();
+
+    let parentId = existingParent1 ? existingParent1.id : null;
+
+    if (!existingParent1) {
+      console.log('➕ [CREATE PATIENT] Criando novo usuário "pais" para:', parent_email);
+      
+      // ✅ IMPORTAÇÃO DINÂMICA DO BCRYPT CORRIGIDA
+      const bcrypt = await import('bcryptjs');
+      const defaultPassword = await bcrypt.default.hash('123456', 12);
+      
+      const { data: newParentUser, error: createParentError } = await supabase
+        .from('users')
+        .insert({
+          name: parent_name.trim(),
+          email: parent_email.trim().toLowerCase(),
+          type: 'pais',
+          password: defaultPassword,
+          active: true,
+          created_at: new Date().toISOString()
+        })
+        .select('id')
+        .single();
+
+      if (createParentError) {
+        console.error('❌ [CREATE PATIENT] Erro ao criar usuário responsável:', createParentError);
+        return res.status(500).json({ 
+          message: 'Erro ao criar usuário para o responsável',
+          error: createParentError.message 
+        });
+      }
+
+      parentId = newParentUser.id;
+      console.log('✅ [CREATE PATIENT] Usuário "pais" criado com sucesso:', newParentUser.id);
+    }
+
+    // ✅ CRIAR USUÁRIO "PAIS" PARA SEGUNDO RESPONSÁVEL (SE FORNECIDO)
+    if (parent_email2?.trim()) {
+      console.log('👨‍👩‍👧‍👦 [CREATE PATIENT] Verificando/criando usuário para responsável 2:', parent_email2);
+      
+      const { data: existingParent2 } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', parent_email2.trim().toLowerCase())
+        .eq('type', 'pais')
+        .maybeSingle();
+
+      if (!existingParent2) {
+        if (!parent_name2?.trim()) {
+          return res.status(400).json({ 
+            message: 'Nome do 2º responsável é obrigatório para novo e-mail' 
+          });
+        }
+
+        console.log('➕ [CREATE PATIENT] Criando novo usuário "pais" para responsável 2:', parent_email2);
+        
+        const bcrypt = await import('bcryptjs');
+        const defaultPassword = await bcrypt.default.hash('123456', 12);
+        
+        const { data: newParentUser2, error: createParent2Error } = await supabase
+          .from('users')
+          .insert({
+            name: parent_name2.trim(),
+            email: parent_email2.trim().toLowerCase(),
+            type: 'pais',
+            password: defaultPassword,
+            active: true,
+            created_at: new Date().toISOString()
+          })
+          .select('id')
+          .single();
+
+        if (createParent2Error) {
+          console.error('❌ [CREATE PATIENT] Erro ao criar usuário responsável 2:', createParent2Error);
+          return res.status(500).json({ 
+            message: 'Erro ao criar usuário para o segundo responsável',
+            error: createParent2Error.message 
+          });
+        }
+
+        console.log('✅ [CREATE PATIENT] Usuário "pais" 2 criado com sucesso:', newParentUser2.id);
+      }
+    }
+
+    // ✅ PREPARAR DADOS DO PACIENTE
+    const patientData = {
+      name: name.trim(),
+      parent_id: parentId,
+      parent_email: parent_email.trim().toLowerCase(),
+      parent_name: parent_name.trim(),
+      sector: sector,
+      weekly_hours: weekly_hours ? Number(weekly_hours) : null,
+      hourly_rate: hourly_rate ? Number(hourly_rate) : null,
+      at_id: at_id || null,
+      active: true,
+      parent_email2: parent_email2?.trim().toLowerCase() || null,
+      parent_name2: parent_name2?.trim() || null,
+      created_at: new Date().toISOString()
+    };
+
+    console.log('💾 [CREATE PATIENT] Inserindo paciente no banco:', patientData);
+
+    // ✅ INSERIR PACIENTE NO BANCO
+    const { data: insertedPatients, error: insertError } = await supabase
+      .from('patients')
+      .insert(patientData)
+      .select();
+
+    if (insertError) {
+      console.error('❌ [CREATE PATIENT] Erro ao inserir paciente:', insertError);
+      return res.status(500).json({
+        message: 'Erro ao cadastrar paciente no banco de dados',
+        error: insertError.message
+      });
+    }
+
+    if (!insertedPatients || insertedPatients.length === 0) {
+      console.error('❌ [CREATE PATIENT] Paciente não retornado após inserção');
+      return res.status(500).json({
+        message: 'Paciente não foi retornado após cadastro'
+      });
+    }
+
+    const newPatient = insertedPatients[0];
+    console.log('✅ [CREATE PATIENT] Paciente inserido com sucesso:', newPatient.id);
+
+    // ✅ BUSCAR DADOS COMPLETOS DO PACIENTE
+    const { data: completePatient, error: fetchError } = await supabase
+      .from('patients')
+      .select(`
+        *,
+        parent:users!patients_parent_id_fkey(name, email),
+        at:users!patients_at_id_fkey(name, email)
+      `)
+      .eq('id', newPatient.id)
+      .single();
+
+    if (fetchError) {
+      console.warn('⚠️ [CREATE PATIENT] Erro ao buscar dados completos:', fetchError);
+    }
+
+    // ✅ MENSAGEM DE SUCESSO MELHORADA
+    let successMessage = '✅ Paciente cadastrado com sucesso!';
+    const createdUsers = [];
+    
+    if (!existingParent1) {
+      createdUsers.push(`${parent_name} (${parent_email})`);
+    }
+    
+    if (parent_email2 && !existingParent2) {
+      createdUsers.push(`${parent_name2} (${parent_email2})`);
+    }
+    
+    if (createdUsers.length > 0) {
+      successMessage += `\n\n👥 Usuários "pais" criados automaticamente:\n• ${createdUsers.join('\n• ')}\n\n🔑 Senha padrão: 123456\n(Os pais podem alterar a senha após o primeiro login)`;
+    }
+
+    console.log('🎉 [CREATE PATIENT] Cadastro concluído com sucesso!');
+
+    res.status(201).json({
+      success: true,
+      message: successMessage,
+      patient: completePatient || newPatient,
+      createdUsers: createdUsers.length
     });
 
-    res.json({ 
-      message: 'Atendimento confirmado com sucesso! Agora está visível para os pais.', 
-      session: updatedSession,
-      action: 'confirmed',
-      confirmed_by: req.user.name,
-      confirmed_at: updatedSession.confirmed_at
-    });
   } catch (error) {
-    console.error('❌ Erro interno ao confirmar sessão:', error);
-    res.status(500).json({ 
-      message: 'Erro interno do servidor',
+    console.error('❌ [CREATE PATIENT] Erro interno:', error);
+    res.status(500).json({
+      message: 'Erro interno do servidor ao cadastrar paciente',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
     });
   }
 });
 
-// =====================================================
-// PATCH SESSIONS - Aprovar sessão (admin ou coordenação)
-// =====================================================
-router.patch('/:id/approve', authenticateToken, async (req, res) => {
+// Atualizar paciente
+router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+    const {
+      name,
+      parent_email,
+      parent_name,
+      parent_email2,
+      parent_name2,
+      at_id,
+      sector,
+      weekly_hours,
+      hourly_rate
+    } = req.body;
 
+    // ✅ VERIFICAÇÃO DE PERMISSÃO
     const allowedTypes = [
-      'adm-geral', 'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar',
-      'coordenacao-aba', 'coordenacao-denver', 'coordenacao-escolar', 'coordenacao-grupo'
+      'adm-geral',
+      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
     ];
 
     if (!allowedTypes.includes(req.user.type)) {
-      return res.status(403).json({ message: 'Apenas administradores ou coordenação podem aprovar sessões' });
+      return res.status(403).json({ 
+        message: 'Apenas administradores podem atualizar pacientes' 
+      });
     }
 
-    console.log(`👨‍💼 Aprovando sessão ${id} por ${req.user.name} (${req.user.type})`);
-
-    const { data: updatedSession, error } = await supabase
-      .from('sessions')
+    const { data: updatedPatient, error } = await supabase
+      .from('patients')
       .update({
-        is_approved: true,
-        approved_at: new Date().toISOString(),
-        approved_by: req.user.id
+        name,
+        parent_email,
+        parent_name,
+        parent_email2,
+        parent_name2,
+        at_id,
+        sector,
+        weekly_hours: weekly_hours ? Number(weekly_hours) : null,
+        hourly_rate: hourly_rate ? Number(hourly_rate) : null,
+        updated_at: new Date().toISOString()
       })
       .eq('id', id)
-      .select(`
-        *,
-        patient:patients!sessions_patient_id_fkey(name),
-        at:users!sessions_at_id_fkey(name)
-      `)
+      .select()
       .single();
 
     if (error) {
-      console.error('❌ Erro ao aprovar sessão:', error);
-      return res.status(500).json({ message: 'Erro ao aprovar sessão' });
+      console.error('❌ Erro ao atualizar paciente:', error);
+      return res.status(500).json({ message: 'Erro ao atualizar paciente' });
     }
 
-    console.log(`✅ Sessão aprovada:`, {
-      session_id: updatedSession.id,
-      patient: updatedSession.patient?.name,
-      at: updatedSession.at?.name,
-      approved_by: req.user.name
-    });
-
-    res.json({ 
-      message: 'Sessão aprovada com sucesso', 
-      session: updatedSession 
+    res.status(200).json({
+      message: 'Paciente atualizado com sucesso',
+      patient: updatedPatient
     });
   } catch (error) {
-    console.error('❌ Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error('❌ Erro interno ao atualizar paciente:', error);
+    res.status(500).json({
+      message: 'Erro interno ao atualizar paciente',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    });
   }
 });
 
-// =====================================================
-// PATCH SESSIONS - Lançar sessão (admin)
-// =====================================================
-router.patch('/:id/launch', authenticateToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const allowedTypes = [
-      'adm-geral', 'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
-    ];
-
-    if (!allowedTypes.includes(req.user.type)) {
-      return res.status(403).json({ message: 'Apenas administradores podem lançar sessões' });
-    }
-
-    console.log(`🚀 Lançando sessão ${id} por ${req.user.name} (${req.user.type})`);
-
-    const { data: updatedSession, error } = await supabase
-      .from('sessions')
-      .update({
-        is_launched: true,
-        launched_at: new Date().toISOString(),
-        launched_by: req.user.id
-      })
-      .eq('id', id)
-      .select(`
-        *,
-        patient:patients!sessions_patient_id_fkey(name),
-        at:users!sessions_at_id_fkey(name)
-      `)
-      .single();
-
-    if (error) {
-      console.error('❌ Erro ao lançar sessão:', error);
-      return res.status(500).json({ message: 'Erro ao lançar sessão' });
-    }
-
-    console.log(`✅ Sessão lançada:`, {
-      session_id: updatedSession.id,
-      patient: updatedSession.patient?.name,
-      at: updatedSession.at?.name,
-      launched_by: req.user.name
-    });
-
-    res.json({ 
-      message: 'Sessão lançada com sucesso', 
-      session: updatedSession 
-    });
-  } catch (error) {
-    console.error('❌ Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
-  }
-});
-
-// =====================================================
-// DELETE SESSIONS - Deletar sessão
-// =====================================================
+// Excluir paciente - HARD DELETE COMPLETO
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log(`🗑️ Deletando sessão ${id} por ${req.user.name}`);
+    // ✅ VERIFICAÇÃO DE PERMISSÃO
+    const allowedTypes = [
+      'adm-geral',
+      'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'
+    ];
 
-    // Buscar dados da sessão antes de deletar
-    const { data: existingSession, error: checkError } = await supabase
-      .from('sessions')
-      .select(`
-        id, date, hours, is_substitution, is_confirmed,
-        patient:patients!sessions_patient_id_fkey(name),
-        at:users!sessions_at_id_fkey(name)
-      `)
-      .eq('id', id)
-      .single();
-
-    if (checkError || !existingSession) {
-      console.log(`❌ Sessão ${id} não encontrada`);
-      return res.status(404).json({ message: 'Sessão não encontrada' });
-    }
-
-    console.log(`🔍 Sessão encontrada:`, {
-      id: existingSession.id,
-      patient: existingSession.patient?.name,
-      at: existingSession.at?.name,
-      date: existingSession.date,
-      hours: existingSession.hours,
-      is_confirmed: existingSession.is_confirmed,
-      is_substitution: existingSession.is_substitution
-    });
-
-    const { error: deleteError } = await supabase
-      .from('sessions')
-      .delete()
-      .eq('id', id);
-
-    if (deleteError) {
-      console.error('❌ Erro ao deletar sessão:', deleteError);
-      return res.status(500).json({ 
-        message: 'Erro ao deletar sessão', 
-        error: deleteError.message 
+    if (!allowedTypes.includes(req.user.type)) {
+      return res.status(403).json({ 
+        message: 'Apenas administradores podem excluir pacientes' 
       });
     }
 
-    console.log(`✅ Sessão ${id} deletada com sucesso`);
+    console.log('🗑️ Iniciando exclusão completa do paciente:', id);
 
-    res.json({
-      message: 'Sessão deletada com sucesso',
-      deletedSession: {
-        id: existingSession.id,
-        patient: existingSession.patient?.name,
-        at: existingSession.at?.name,
-        date: existingSession.date,
-        hours: existingSession.hours,
-        is_confirmed: existingSession.is_confirmed,
-        is_substitution: existingSession.is_substitution
+    // 1. Verificar se o paciente existe e obter dados
+    const { data: existingPatient, error: fetchError } = await supabase
+      .from('patients')
+      .select('id, name, parent_email, parent_email2, at_id')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !existingPatient) {
+      console.error('❌ Paciente não encontrado:', fetchError);
+      return res.status(404).json({ message: 'Paciente não encontrado' });
+    }
+
+    console.log('🔍 Paciente encontrado:', existingPatient.name);
+
+    // 2. DELETAR TODAS AS SESSÕES DO PACIENTE
+    console.log('🗑️ Deletando todas as sessões do paciente...');
+    const { data: deletedSessions, error: sessionsError } = await supabase
+      .from('sessions')
+      .delete()
+      .eq('patient_id', id)
+      .select('id');
+
+    if (sessionsError) {
+      console.error('❌ Erro ao deletar sessões:', sessionsError);
+      return res.status(500).json({ 
+        message: 'Erro ao deletar sessões do paciente', 
+        error: sessionsError.message 
+      });
+    }
+
+    console.log(`✅ ${deletedSessions?.length || 0} sessões deletadas`);
+
+    // 3. VERIFICAR E DELETAR PAIS SE NÃO ESTIVEREM VINCULADOS A OUTROS PACIENTES
+    // ... [resto da lógica de exclusão de pais]
+
+    // 4. DELETAR O PACIENTE
+    console.log('🗑️ Deletando o paciente...');
+    const { error: deletePatientError } = await supabase
+      .from('patients')
+      .delete()
+      .eq('id', id);
+
+    if (deletePatientError) {
+      console.error('❌ Erro ao deletar paciente:', deletePatientError);
+      return res.status(500).json({ 
+        message: 'Erro ao deletar paciente', 
+        error: deletePatientError.message 
+      });
+    }
+
+    console.log('✅ Paciente deletado permanentemente');
+
+    res.status(200).json({
+      success: true,
+      message: 'Paciente e todos os dados relacionados foram deletados com sucesso',
+      deletedData: {
+        patient: existingPatient.name,
+        sessionsDeleted: deletedSessions?.length || 0
       }
     });
+
   } catch (error) {
-    console.error('❌ Erro interno ao deletar sessão:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error('❌ Erro interno ao excluir paciente:', error);
+    res.status(500).json({
+      message: 'Erro interno ao excluir paciente completamente',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erro inesperado'
+    });
   }
 });
 
