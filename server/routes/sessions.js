@@ -1,41 +1,78 @@
-// ✅ ARQUIVO SUPERVISIONS.JS CORRIGIDO E MELHORADO
+// ✅ ARQUIVO SESSIONS.JS CORRIGIDO - ROTAS PARA SESSÕES/ATENDIMENTOS
 import express from 'express';
 import supabase from '../config/supabase.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// ✅ LISTAR SUPERVISÕES
+// ✅ LISTAR SESSÕES
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { month, year, at_id } = req.query;
-    
-    console.log('🔍 [SUPERVISIONS] Carregando supervisões para usuário:', req.user.type);
-    
+    const { month, year, patient_id, at_id } = req.query;
+
+    console.log('🔍 [SESSIONS] Carregando sessões para usuário:', req.user.type);
+
     let query = supabase
-      .from('supervisions')
+      .from('sessions')
       .select(`
         *,
-        at:users!supervisions_at_id_fkey(id, name, sector),
-        coordinator:users!supervisions_coordinator_id_fkey(id, name, sector)
+        patient:patients!sessions_patient_id_fkey(id, name, sector, parent_email, parent_email2),
+        at:users!sessions_at_id_fkey(id, name, sector)
       `)
       .order('date', { ascending: false })
       .order('start_time', { ascending: false });
 
     // ✅ FILTROS POR TIPO DE USUÁRIO
-    if (req.user.type.startsWith('coordenacao-')) {
-      // Coordenadores veem supervisões que criaram
-      query = query.eq('coordinator_id', req.user.id);
+    if (req.user.type === 'pais') {
+      // Pais veem apenas sessões dos seus filhos
+      const { data: parentUser, error: parentError } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', req.user.id)
+        .single();
+
+      if (parentError) {
+        return res.status(500).json({ message: 'Erro ao buscar dados do responsável' });
+      }
+
+      const { data: myPatients, error: patientsError } = await supabase
+        .from('patients')
+        .select('id')
+        .or(`parent_email.ilike.${parentUser.email},parent_email2.ilike.${parentUser.email}`);
+
+      if (patientsError) {
+        return res.status(500).json({ message: 'Erro ao buscar pacientes' });
+      }
+
+      const patientIds = myPatients.map(p => p.id);
+      if (patientIds.length === 0) {
+        return res.json([]);
+      }
+
+      query = query.in('patient_id', patientIds);
+
     } else if (req.user.type.startsWith('at-')) {
-      // ATs veem suas próprias supervisões
+      // ATs veem apenas suas próprias sessões
       query = query.eq('at_id', req.user.id);
+
     } else if (req.user.sector && req.user.type !== 'adm-geral') {
-      // Usuários setoriais veem supervisões do seu setor
-      query = query.eq('sector', req.user.sector);
+      // Usuários setoriais veem sessões do seu setor
+      const { data: sectorPatients } = await supabase
+        .from('patients')
+        .select('id')
+        .eq('sector', req.user.sector);
+
+      const patientIds = sectorPatients?.map(p => p.id) || [];
+      if (patientIds.length > 0) {
+        query = query.in('patient_id', patientIds);
+      }
     }
-    // Admin geral vê todas
 
     // ✅ FILTROS ADICIONAIS
+    if (patient_id) {
+      query = query.eq('patient_id', patient_id);
+    }
+
     if (at_id) {
       query = query.eq('at_id', at_id);
     }
@@ -46,69 +83,44 @@ router.get('/', authenticateToken, async (req, res) => {
       query = query.gte('date', startDate).lte('date', endDate);
     }
 
-    const { data: supervisions, error } = await query;
+    const { data: sessions, error } = await query;
 
     if (error) {
-      console.error('❌ [SUPERVISIONS] Erro ao buscar supervisões:', error);
-      return res.status(500).json({ message: 'Erro ao buscar supervisões' });
+      console.error('❌ [SESSIONS] Erro ao buscar sessões:', error);
+      return res.status(500).json({ message: 'Erro ao buscar sessões' });
     }
 
-    console.log(`✅ [SUPERVISIONS] ${supervisions?.length || 0} supervisões encontradas`);
-    res.json(supervisions || []);
+    console.log(`✅ [SESSIONS] ${sessions?.length || 0} sessões encontradas`);
+    res.json(sessions || []);
 
   } catch (error) {
-    console.error('❌ [SUPERVISIONS] Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno ao buscar supervisões' });
+    console.error('❌ [SESSIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao buscar sessões' });
   }
 });
 
-// ✅ CRIAR SUPERVISÃO
+// ✅ CRIAR SESSÃO/ATENDIMENTO
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { at_id, start_time, end_time, date, observations } = req.body;
+    const { patient_id, start_time, end_time, date, observations, is_substitution } = req.body;
 
-    console.log('📤 [SUPERVISIONS] Criando supervisão:', {
-      at_id,
+    console.log('📤 [SESSIONS] Criando sessão:', {
+      patient_id,
       start_time,
       end_time,
       date,
       user: req.user.type,
-      sector: req.user.sector
+      is_substitution
     });
 
     // ✅ VALIDAÇÕES
-    if (!at_id || !start_time || !end_time || !date) {
+    if (!patient_id || !start_time || !end_time || !date) {
       return res.status(400).json({ message: 'Todos os campos obrigatórios devem ser preenchidos' });
     }
 
     // ✅ VERIFICAR PERMISSÕES
-    // ATs podem criar supervisões para si mesmos
-    // Coordenadores podem criar supervisões para qualquer AT
-    // Admins podem criar supervisões
-    if (!req.user.type.startsWith('coordenacao-') && 
-        !req.user.type.startsWith('adm-') && 
-        !req.user.type.startsWith('at-')) {
-      return res.status(403).json({ message: 'Você não tem permissão para criar supervisões' });
-    }
-
-    // ✅ SE FOR UM AT, SÓ PODE CRIAR SUPERVISÃO PARA SI MESMO
-    if (req.user.type.startsWith('at-') && at_id !== req.user.id) {
-      return res.status(403).json({ message: 'ATs só podem criar supervisões para si mesmos' });
-    }
-
-    // ✅ VERIFICAR SE O AT EXISTE
-    const { data: atUser, error: atError } = await supabase
-      .from('users')
-      .select('id, name, sector, type')
-      .eq('id', at_id)
-      .single();
-
-    if (atError || !atUser) {
-      return res.status(404).json({ message: 'AT não encontrado' });
-    }
-
-    if (!atUser.type.startsWith('at-')) {
-      return res.status(400).json({ message: 'Usuário selecionado não é um AT' });
+    if (!req.user.type.startsWith('at-')) {
+      return res.status(403).json({ message: 'Apenas ATs podem criar sessões' });
     }
 
     // ✅ CALCULAR HORAS
@@ -117,8 +129,7 @@ router.post('/', authenticateToken, async (req, res) => {
       const [endHour, endMin] = end.split(':').map(Number);
       const startMinutes = startHour * 60 + startMin;
       const endMinutes = endHour * 60 + endMin;
-      const diffMinutes = endMinutes - startMinutes;
-      return Math.round((Math.max(0, diffMinutes) / 60) * 2) / 2; // Arredondar para 0.5
+      return Math.max(0, (endMinutes - startMinutes) / 60);
     };
 
     const hours = calculateHours(start_time, end_time);
@@ -127,296 +138,277 @@ router.post('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Horário de fim deve ser posterior ao horário de início' });
     }
 
+    // ✅ VERIFICAR SE PACIENTE EXISTE
+    const { data: patient, error: patientError } = await supabase
+      .from('patients')
+      .select('id, name, sector, at_id')
+      .eq('id', patient_id)
+      .single();
+
+    if (patientError || !patient) {
+      return res.status(404).json({ message: 'Paciente não encontrado' });
+    }
+
+    // ✅ VERIFICAR PERMISSÃO PARA ATENDER ESTE PACIENTE
+    if (!is_substitution && patient.at_id !== req.user.id) {
+      return res.status(403).json({ message: 'Você não é o AT responsável por este paciente' });
+    }
+
+    // ✅ PARA SUBSTITUIÇÃO, VERIFICAR SE É DO MESMO SETOR
+    if (is_substitution && patient.sector !== req.user.sector) {
+      return res.status(403).json({ message: 'Substituições só são permitidas dentro do mesmo setor' });
+    }
+
     // ✅ VERIFICAR DUPLICATAS
-    const { data: existingSupervision } = await supabase
-      .from('supervisions')
+    const { data: existingSession } = await supabase
+      .from('sessions')
       .select('id')
-      .eq('at_id', at_id)
+      .eq('patient_id', patient_id)
+      .eq('at_id', req.user.id)
       .eq('date', date)
       .eq('start_time', start_time)
       .eq('end_time', end_time)
       .maybeSingle();
 
-    if (existingSupervision) {
-      return res.status(409).json({ message: 'Já existe uma supervisão idêntica registrada' });
+    if (existingSession) {
+      return res.status(409).json({ message: 'Já existe uma sessão idêntica registrada' });
     }
 
-    // ✅ DETERMINAR COORDINATOR_ID E SECTOR
-    let coordinatorId;
-    let sector;
-    
-    if (req.user.type.startsWith('at-')) {
-      // AT criando supervisão para si mesmo
-      coordinatorId = req.user.id;
-      sector = req.user.sector;
-    } else if (req.user.type.startsWith('coordenacao-')) {
-      // Coordenador criando supervisão
-      coordinatorId = req.user.id;
-      sector = req.user.sector;
-    } else {
-      // Admin criando supervisão
-      coordinatorId = req.user.id;
-      sector = atUser.sector; // Usar setor do AT
-    }
-
-    // ✅ INSERIR SUPERVISÃO
-    const supervisionData = {
-      at_id,
-      coordinator_id: coordinatorId,
+    // ✅ INSERIR SESSÃO
+    const sessionData = {
+      patient_id,
+      at_id: req.user.id,
       start_time,
       end_time,
       date,
       hours,
-      sector: sector,
       observations: observations || '',
+      is_substitution: !!is_substitution,
+      is_confirmed: false,
+      is_approved: false,
+      is_launched: false,
       created_at: new Date().toISOString()
     };
 
-    const { data: newSupervision, error: insertError } = await supabase
-      .from('supervisions')
-      .insert(supervisionData)
+    const { data: newSession, error: insertError } = await supabase
+      .from('sessions')
+      .insert(sessionData)
       .select(`
         *,
-        at:users!supervisions_at_id_fkey(name, sector),
-        coordinator:users!supervisions_coordinator_id_fkey(name, sector)
+        patient:patients!sessions_patient_id_fkey(name, sector),
+        at:users!sessions_at_id_fkey(name, sector)
       `)
       .single();
 
     if (insertError) {
-      console.error('❌ [SUPERVISIONS] Erro ao inserir supervisão:', insertError);
-      return res.status(500).json({ 
-        message: 'Erro ao criar supervisão', 
-        error: insertError.message,
-        details: insertError.details || 'Detalhes não disponíveis'
-      });
+      console.error('❌ [SESSIONS] Erro ao inserir sessão:', insertError);
+      return res.status(500).json({ message: 'Erro ao criar sessão', error: insertError.message });
     }
 
-    console.log('✅ [SUPERVISIONS] Supervisão criada com sucesso:', {
-      id: newSupervision.id,
-      at_id: newSupervision.at_id,
-      coordinator_id: newSupervision.coordinator_id,
-      hours: newSupervision.hours,
-      sector: newSupervision.sector,
-      created_by: req.user.name
-    });
+    console.log('✅ [SESSIONS] Sessão criada com sucesso:', newSession.id);
 
     res.status(201).json({
-      message: 'Supervisão criada com sucesso',
-      supervisionId: newSupervision.id,
-      supervision: newSupervision
+      message: 'Atendimento registrado com sucesso',
+      session: newSession
     });
 
   } catch (error) {
-    console.error('❌ [SUPERVISIONS] Erro interno ao criar supervisão:', error);
-    res.status(500).json({ 
-      message: 'Erro interno ao criar supervisão',
-      error: error.message
-    });
+    console.error('❌ [SESSIONS] Erro interno ao criar sessão:', error);
+    res.status(500).json({ message: 'Erro interno ao criar sessão' });
   }
 });
 
-// ✅ EXCLUIR SUPERVISÃO
-router.delete('/:id', authenticateToken, async (req, res) => {
+// ✅ CONFIRMAR SESSÃO (RECEPÇÃO)
+router.patch('/:id/confirm', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('🗑️ [SUPERVISIONS] Excluindo supervisão:', id);
+    console.log('✅ [SESSIONS] Confirmando sessão:', id, 'por:', req.user.type);
 
-    // ✅ VERIFICAR SE SUPERVISÃO EXISTE
-    const { data: supervision, error: supervisionError } = await supabase
-      .from('supervisions')
+    // ✅ VERIFICAR PERMISSÃO
+    const allowedTypes = ['adm-geral', 'adm-aba', 'adm-denver', 'adm-grupo', 'adm-escolar'];
+    if (!allowedTypes.includes(req.user.type)) {
+      return res.status(403).json({ message: 'Apenas administradores podem confirmar sessões' });
+    }
+
+    // ✅ VERIFICAR SE SESSÃO EXISTE
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
       .select('*')
       .eq('id', id)
       .single();
 
-    if (supervisionError || !supervision) {
-      console.error('❌ [SUPERVISIONS] Supervisão não encontrada:', supervisionError);
-      return res.status(404).json({ message: 'Supervisão não encontrada' });
+    if (sessionError || !session) {
+      return res.status(404).json({ message: 'Sessão não encontrada' });
     }
 
-    console.log('🔍 [SUPERVISIONS] Supervisão encontrada:', {
-      id: supervision.id,
-      date: supervision.date,
-      hours: supervision.hours,
-      at_id: supervision.at_id,
-      coordinator_id: supervision.coordinator_id
+    if (session.is_confirmed) {
+      return res.status(400).json({ message: 'Sessão já foi confirmada' });
+    }
+
+    // ✅ CONFIRMAR SESSÃO
+    const { data: confirmedSession, error: updateError } = await supabase
+      .from('sessions')
+      .update({ 
+        is_confirmed: true,
+        confirmed_at: new Date().toISOString(),
+        confirmed_by: req.user.id
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error('❌ [SESSIONS] Erro ao confirmar sessão:', updateError);
+      return res.status(500).json({ message: 'Erro ao confirmar sessão' });
+    }
+
+    console.log('✅ [SESSIONS] Sessão confirmada com sucesso');
+    res.json({
+      message: 'Sessão confirmada com sucesso',
+      session: confirmedSession
     });
+
+  } catch (error) {
+    console.error('❌ [SESSIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao confirmar sessão' });
+  }
+});
+
+// ✅ APROVAR SESSÃO
+router.patch('/:id/approve', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({ message: 'Sessão não encontrada' });
+    }
+
+    if (!session.is_confirmed) {
+      return res.status(400).json({ message: 'Sessão deve ser confirmada antes de ser aprovada' });
+    }
+
+    const { data: approvedSession, error: updateError } = await supabase
+      .from('sessions')
+      .update({ 
+        is_approved: true,
+        approved_at: new Date().toISOString(),
+        approved_by: req.user.id
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({ message: 'Erro ao aprovar sessão' });
+    }
+
+    res.json({
+      message: 'Sessão aprovada com sucesso',
+      session: approvedSession
+    });
+
+  } catch (error) {
+    console.error('❌ [SESSIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao aprovar sessão' });
+  }
+});
+
+// ✅ LANÇAR SESSÃO
+router.patch('/:id/launch', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({ message: 'Sessão não encontrada' });
+    }
+
+    if (!session.is_approved) {
+      return res.status(400).json({ message: 'Sessão deve ser aprovada antes de ser lançada' });
+    }
+
+    const { data: launchedSession, error: updateError } = await supabase
+      .from('sessions')
+      .update({ 
+        is_launched: true,
+        launched_at: new Date().toISOString(),
+        launched_by: req.user.id
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({ message: 'Erro ao lançar sessão' });
+    }
+
+    res.json({
+      message: 'Sessão lançada com sucesso',
+      session: launchedSession
+    });
+
+  } catch (error) {
+    console.error('❌ [SESSIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao lançar sessão' });
+  }
+});
+
+// ✅ EXCLUIR SESSÃO
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log('🗑️ [SESSIONS] Excluindo sessão:', id);
+
+    // ✅ VERIFICAR SE SESSÃO EXISTE
+    const { data: session, error: sessionError } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (sessionError || !session) {
+      return res.status(404).json({ message: 'Sessão não encontrada' });
+    }
 
     // ✅ VERIFICAR PERMISSÃO
     const canDelete = req.user.type.startsWith('adm-') || 
                      req.user.type.startsWith('financeiro-') ||
-                     supervision.coordinator_id === req.user.id ||
-                     (req.user.type.startsWith('at-') && supervision.at_id === req.user.id);
+                     (req.user.type.startsWith('at-') && session.at_id === req.user.id && !session.is_confirmed);
 
     if (!canDelete) {
-      return res.status(403).json({ message: 'Você não tem permissão para excluir esta supervisão' });
+      return res.status(403).json({ message: 'Você não tem permissão para excluir esta sessão' });
     }
 
-    // ✅ EXCLUIR SUPERVISÃO (HARD DELETE)
+    // ✅ EXCLUIR SESSÃO
     const { error: deleteError } = await supabase
-      .from('supervisions')
+      .from('sessions')
       .delete()
       .eq('id', id);
 
     if (deleteError) {
-      console.error('❌ [SUPERVISIONS] Erro ao deletar supervisão:', deleteError);
-      return res.status(500).json({ 
-        message: 'Erro ao excluir supervisão', 
-        error: deleteError.message 
-      });
+      console.error('❌ [SESSIONS] Erro ao excluir:', deleteError);
+      return res.status(500).json({ message: 'Erro ao excluir sessão' });
     }
 
-    console.log('✅ [SUPERVISIONS] Supervisão excluída permanentemente');
-    res.json({ 
-      message: 'Supervisão excluída com sucesso',
-      deletedSupervision: {
-        id: supervision.id,
-        date: supervision.date,
-        hours: supervision.hours
-      }
-    });
+    console.log('✅ [SESSIONS] Sessão excluída com sucesso');
+    res.json({ message: 'Sessão excluída com sucesso' });
 
   } catch (error) {
-    console.error('❌ [SUPERVISIONS] Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno ao excluir supervisão' });
-  }
-});
-
-// ✅ BUSCAR TAXAS DE SUPERVISÃO
-router.get('/rates', authenticateToken, async (req, res) => {
-  try {
-    console.log('🔍 [SUPERVISIONS] Carregando taxas de supervisão para:', req.user.type);
-    
-    // Apenas financeiro-ats pode acessar taxas de supervisão
-    if (req.user.type !== 'financeiro-ats') {
-      return res.status(403).json({ message: 'Acesso negado. Apenas financeiro-ats pode acessar taxas de supervisão.' });
-    }
-
-    const { data: rates, error } = await supabase
-      .from('supervision_rates')
-      .select('*')
-      .single();
-
-    if (error && error.code !== 'PGRST116') { // PGRST116 = not found
-      console.error('❌ [SUPERVISIONS] Erro ao buscar taxas:', error);
-      return res.status(500).json({ message: 'Erro ao buscar taxas de supervisão' });
-    }
-
-    // Se não há taxas, retornar valores padrão
-    if (!rates) {
-      console.log('📋 [SUPERVISIONS] Nenhuma taxa encontrada, retornando valores padrão');
-      const defaultRates = {
-        aba: 35,
-        denver: 35,
-        grupo: 35,
-        escolar: 35
-      };
-      return res.json(defaultRates);
-    }
-
-    const responseRates = {
-      aba: rates.aba || 35,
-      denver: rates.denver || 35,
-      grupo: rates.grupo || 35,
-      escolar: rates.escolar || 35
-    };
-
-    console.log('✅ [SUPERVISIONS] Taxas de supervisão carregadas:', responseRates);
-    res.json(responseRates);
-
-  } catch (error) {
-    console.error('❌ [SUPERVISIONS] Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno ao buscar taxas' });
-  }
-});
-
-// ✅ SALVAR TAXAS DE SUPERVISÃO
-router.post('/rates', authenticateToken, async (req, res) => {
-  try {
-    const { aba, denver, grupo, escolar } = req.body;
-
-    console.log('💾 [SUPERVISIONS] Salvando taxas de supervisão:', { aba, denver, grupo, escolar });
-    console.log('👤 [SUPERVISIONS] Usuário:', req.user.type);
-
-    // Apenas financeiro-ats pode salvar taxas de supervisão
-    if (req.user.type !== 'financeiro-ats') {
-      console.log('❌ [SUPERVISIONS] Acesso negado para tipo de usuário:', req.user.type);
-      return res.status(403).json({ message: 'Acesso negado. Apenas financeiro-ats pode salvar taxas de supervisão.' });
-    }
-
-    // ✅ VALIDAR ENTRADA
-    if (aba === undefined || denver === undefined || grupo === undefined || escolar === undefined) {
-      console.log('❌ [SUPERVISIONS] Campos obrigatórios ausentes');
-      return res.status(400).json({ message: 'Todos os campos de taxa (aba, denver, grupo, escolar) são obrigatórios' });
-    }
-
-    if (isNaN(Number(aba)) || isNaN(Number(denver)) || isNaN(Number(grupo)) || isNaN(Number(escolar))) {
-      console.log('❌ [SUPERVISIONS] Valores inválidos fornecidos');
-      return res.status(400).json({ message: 'Todas as taxas devem ser números válidos' });
-    }
-
-    const numericRates = {
-      aba: Number(aba),
-      denver: Number(denver),
-      grupo: Number(grupo),
-      escolar: Number(escolar)
-    };
-
-    // ✅ VERIFICAR SE TAXAS JÁ EXISTEM
-    const { data: existingRates, error: checkError } = await supabase
-      .from('supervision_rates')
-      .select('id')
-      .single();
-
-    let result;
-    if (existingRates && !checkError) {
-      console.log('🔄 [SUPERVISIONS] Atualizando taxas existentes');
-      // Atualizar taxas existentes
-      const { data, error } = await supabase
-        .from('supervision_rates')
-        .update({
-          aba: numericRates.aba,
-          denver: numericRates.denver,
-          grupo: numericRates.grupo,
-          escolar: numericRates.escolar,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', existingRates.id)
-        .select()
-        .single();
-      
-      result = { data, error };
-    } else {
-      console.log('➕ [SUPERVISIONS] Criando novas taxas');
-      // Inserir novas taxas
-      const { data, error } = await supabase
-        .from('supervision_rates')
-        .insert({
-          aba: numericRates.aba,
-          denver: numericRates.denver,
-          grupo: numericRates.grupo,
-          escolar: numericRates.escolar
-        })
-        .select()
-        .single();
-      
-      result = { data, error };
-    }
-
-    if (result.error) {
-      console.error('❌ [SUPERVISIONS] Erro ao salvar taxas:', result.error);
-      return res.status(500).json({ message: 'Erro ao salvar taxas de supervisão', error: result.error.message });
-    }
-
-    console.log('✅ [SUPERVISIONS] Taxas de supervisão salvas com sucesso:', result.data);
-    res.json({
-      message: 'Taxas de supervisão salvas com sucesso',
-      rates: numericRates
-    });
-
-  } catch (error) {
-    console.error('❌ [SUPERVISIONS] Erro interno:', error);
-    res.status(500).json({ message: 'Erro interno ao salvar taxas' });
+    console.error('❌ [SESSIONS] Erro interno:', error);
+    res.status(500).json({ message: 'Erro interno ao excluir sessão' });
   }
 });
 
