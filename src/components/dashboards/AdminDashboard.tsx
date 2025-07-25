@@ -1135,6 +1135,544 @@ export const AdminDashboard: React.FC = () => {
       {/* Aqui você pode adicionar as outras abas (ATs, Pacientes, Atendimentos) se necessário */}
       {/* Por brevidade, estou omitindo o resto do código das outras abas */}
       {/* Elas permanecem iguais ao código original */}
+
+      {/* ABA: Gerenciar ATs */}
+      {activeTab === 'ats' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Gerenciar ATs - {userSector?.toUpperCase()}</CardTitle>
+              <Button 
+                onClick={() => {
+                  setShowATForm(!showATForm);
+                  setEditingAT(null);
+                }}
+                disabled={submitting}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Novo AT
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {/* Formulário de AT */}
+            {showATForm && (
+              <form onSubmit={handleATSubmit} className="space-y-4 mb-6 p-6 bg-gray-50 rounded-lg border-2 border-purple-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-purple-800">
+                    {editingAT ? '📝 Editar AT' : '➕ Cadastrar Novo AT'}
+                  </h3>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setShowATForm(false);
+                      setEditingAT(null);
+                    }}
+                  >
+                    ✕ Cancelar
+                  </Button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Nome Completo *
+                    </label>
+                    <Input
+                      name="name"
+                      value={newATForm.name}
+                      onChange={handleATInputChange}
+                      placeholder="Nome completo do AT"
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Setor *
+                    </label>
+                    <Select
+                      name="sector"
+                      value={newATForm.sector}
+                      onChange={handleATInputChange}
+                      required
+                      disabled={!isAdminGeral}
+                    >
+                      <option value="aba">ABA</option>
+                      <option value="denver">Denver</option>
+                      <option value="grupo">Grupo</option>
+                      <option value="escolar">Escolar</option>
+                    </Select>
+                    {!isAdminGeral && (
+                      <p className="text-xs text-gray-500 mt-1">Setor fixo: {userSector?.toUpperCase()}</p>
+                    )}
+                  </div>
+                      required
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Valor por Hora (R$) *
+                    </label>
+                    <Input
+                      type="number"
+                      name="hourly_rate"
+                      value={newATForm.hourly_rate}
+                      onChange={handleATInputChange}
+                      placeholder="35.00"
+                      required
+                      step="0.01"
+                      min="0"
+                    />
+                  </div>
+                </div>
+                    />
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <Button 
+                    type="button" 
+                    variant="secondary" 
+                    onClick={() => {
+                      setShowATForm(false);
+                      setEditingAT(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button type="submit">
+                    {editingAT ? '📝 Atualizar' : '➕ Cadastrar'} AT
+                  </Button>
+                </div>
+              </form>
+            )}
+                  </div>
+            {/* Lista de ATs */}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeadCell>Nome</TableHeadCell>
+                  <TableHeadCell>Email</TableHeadCell>
+                  <TableHeadCell>Setor</TableHeadCell>
+                  <TableHeadCell>Valor/Hora</TableHeadCell>
+                  <TableHeadCell>Pacientes</TableHeadCell>
+                  <TableHeadCell>Ações</TableHeadCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sectorAts.map(at => {
+                  const atPatients = sectorPatients.filter(p => p.at_id === at.id);
+                  return (
+                    <TableRow key={at.id}>
+                      <TableCell className="font-medium">{at.name}</TableCell>
+                      <TableCell>{at.email}</TableCell>
+                      <TableCell className="uppercase">{at.sector}</TableCell>
+                      <TableCell>R$ {(at.hourly_rate || 0).toFixed(2)}</TableCell>
+                      <TableCell>{atPatients.length}</TableCell>
+                      <TableCell>
+                        <div className="flex space-x-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleEditAT(at.id)}
+                            title="Editar AT"
+                          >
+                            <Edit2 size={14} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => handleDeleteAT(at.id)}
+                            title="Excluir AT"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            {sectorAts.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <UserPlus className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+                <p>Nenhum AT cadastrado no setor {userSector?.toUpperCase()}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+                  <div>
+      {/* ABA: Gerenciar Pacientes */}
+      {activeTab === 'pacientes' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Gerenciar Pacientes - {userSector?.toUpperCase()}</CardTitle>
+              <Button 
+                onClick={() => {
+                  setShowPatientForm(!showPatientForm);
+                  setEditingPatient(null);
+                }}
+                disabled={submitting}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Novo Paciente
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {/* Formulário de Paciente */}
+            {showPatientForm && (
+              <form onSubmit={handlePatientSubmit} className="space-y-4 mb-6 p-6 bg-gray-50 rounded-lg border-2 border-purple-200">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-purple-800">
+                    {editingPatient ? '📝 Editar Paciente' : '➕ Cadastrar Novo Paciente'}
+                  </h3>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setShowPatientForm(false);
+                      setEditingPatient(null);
+                    }}
+                  >
+                    ✕ Cancelar
+                  </Button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Nome do Paciente *
+                    </label>
+                    <Input
+                      name="name"
+                      value={newPatientForm.name}
+                      onChange={handlePatientInputChange}
+                      placeholder="Nome completo do paciente"
+                      required
+                    />
+                  </div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Setor *
+                    </label>
+                    <Select
+                      name="sector"
+                      value={newPatientForm.sector}
+                      onChange={handlePatientInputChange}
+                      required
+                      disabled={!isAdminGeral}
+                    >
+                      <option value="aba">ABA</option>
+                      <option value="denver">Denver</option>
+                      <option value="grupo">Grupo</option>
+                      <option value="escolar">Escolar</option>
+                    </Select>
+                    {!isAdminGeral && (
+                      <p className="text-xs text-gray-500 mt-1">Setor fixo: {userSector?.toUpperCase()}</p>
+                    )}
+                  </div>
+                      Email *
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      AT Responsável
+                    </label>
+                    <Select
+                      name="assignedATId"
+                      value={newPatientForm.assignedATId}
+                      onChange={handlePatientInputChange}
+                    >
+                      <option value="">Selecione um AT</option>
+                      {sectorAts.map(at => (
+                        <option key={at.id} value={at.id}>
+                          {at.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                    </label>
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Carga Horária Semanal
+                    </label>
+                    <Input
+                      type="number"
+                      name="weeklyHours"
+                      value={newPatientForm.weeklyHours}
+                      onChange={handlePatientInputChange}
+                      placeholder="20"
+                      step="0.5"
+                      min="0"
+                    />
+                  </div>
+                    <Input
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Valor por Hora (R$)
+                    </label>
+                    <Input
+                      type="number"
+                      name="hourly_rate"
+                      value={newPatientForm.hourly_rate}
+                      onChange={handlePatientInputChange}
+                      placeholder="60.00"
+                      step="0.01"
+                      min="0"
+                    />
+                  </div>
+                      type="email"
+                  <div className="md:col-span-2">
+                    <h4 className="text-md font-semibold text-purple-800 mb-3">Dados do Responsável Principal</h4>
+                  </div>
+                      name="email"
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Nome do Responsável *
+                    </label>
+                    <Input
+                      name="parentName"
+                      value={newPatientForm.parentName}
+                      onChange={handlePatientInputChange}
+                      placeholder="Nome completo"
+                      required
+                    />
+                  </div>
+                      value={newATForm.email}
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Email do Responsável *
+                    </label>
+                    <Input
+                      type="email"
+                      name="parentEmail"
+                      value={newPatientForm.parentEmail}
+                      onChange={handlePatientInputChange}
+                      placeholder="email@exemplo.com"
+                      required
+                    />
+                  </div>
+                      onChange={handleATInputChange}
+                  <div className="md:col-span-2">
+                    <h4 className="text-md font-semibold text-purple-800 mb-3">Segundo Responsável (Opcional)</h4>
+                  </div>
+                      placeholder="email@exemplo.com"
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Nome do 2º Responsável
+                    </label>
+                    <Input
+                      name="parentName2"
+                      value={newPatientForm.parentName2}
+                      onChange={handlePatientInputChange}
+                      placeholder="Nome completo"
+                    />
+                  </div>
+                      required
+                  <div>
+                    <label className="block text-sm font-semibold text-purple-800 mb-2">
+                      Email do 2º Responsável
+                    </label>
+                    <Input
+                      type="email"
+                      name="parentEmail2"
+                      value={newPatientForm.parentEmail2}
+                      onChange={handlePatientInputChange}
+                      placeholder="email@exemplo.com"
+                    />
+                  </div>
+                </div>
+                      disabled={!!editingAT}
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <Button 
+                    type="button" 
+                    variant="secondary" 
+                    onClick={() => {
+                      setShowPatientForm(false);
+                      setEditingPatient(null);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button type="submit">
+                    {editingPatient ? '📝 Atualizar' : '➕ Cadastrar'} Paciente
+                  </Button>
+                </div>
+              </form>
+            )}
+                    />
+            {/* Lista de Pacientes */}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeadCell>Nome</TableHeadCell>
+                  <TableHeadCell>Responsável</TableHeadCell>
+                  <TableHeadCell>AT</TableHeadCell>
+                  <TableHeadCell>Setor</TableHeadCell>
+                  <TableHeadCell>Carga Semanal</TableHeadCell>
+                  <TableHeadCell>Ações</TableHeadCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sectorPatients.map(patient => {
+                  const at = sectorAts.find(a => a.id === patient.at_id);
+                  return (
+                    <TableRow key={patient.id}>
+                      <TableCell className="font-medium">{patient.name}</TableCell>
+                      <TableCell>
+                        {patient.parent_name || patient.parent?.name || 'N/A'}
+                        <div className="text-xs text-gray-500">{patient.parent_email}</div>
+                      </TableCell>
+                      <TableCell>{at?.name || 'Não atribuído'}</TableCell>
+                      <TableCell className="uppercase">{patient.sector}</TableCell>
+                      <TableCell>{formatHours(patient.weekly_hours || 0)}</TableCell>
+                      <TableCell>
+                        <div className="flex space-x-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleEditPatient(patient.id)}
+                            title="Editar paciente"
+                          >
+                            <Edit2 size={14} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            onClick={() => handleDeletePatient(patient.id)}
+                            title="Excluir paciente"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+                    {editingAT && (
+            {sectorPatients.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <Users className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+                <p>Nenhum paciente cadastrado no setor {userSector?.toUpperCase()}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+                      <p className="text-xs text-gray-500 mt-1">Email não pode ser alterado</p>
+      {/* ABA: Gerenciar Atendimentos */}
+      {activeTab === 'atendimentos' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Gerenciar Atendimentos - {userSector?.toUpperCase()}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeadCell>Data</TableHeadCell>
+                  <TableHeadCell>Paciente</TableHeadCell>
+                  <TableHeadCell>AT</TableHeadCell>
+                  <TableHeadCell>Horário</TableHeadCell>
+                  <TableHeadCell>Horas</TableHeadCell>
+                  <TableHeadCell>Status</TableHeadCell>
+                  <TableHeadCell>Ações</TableHeadCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredSessions.map(session => {
+                  const patient = patients.find(p => p.id === session.patient_id);
+                  const at = ats.find(a => a.id === session.at_id);
+                  const hours = calculateHours(session.start_time, session.end_time);
+                    )}
+                  return (
+                    <TableRow key={session.id}>
+                      <TableCell>{formatDateBR(session.date)}</TableCell>
+                      <TableCell className="font-medium">
+                        {patient?.name || 'N/A'}
+                        <div className="text-xs text-gray-500">{patient?.sector?.toUpperCase()}</div>
+                      </TableCell>
+                      <TableCell>
+                        {at?.name || 'N/A'}
+                        {session.is_substitution && (
+                          <div className="text-xs text-orange-600 font-medium">
+                            🔄 Substituição
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm font-mono">
+                          {session.start_time} - {session.end_time}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium text-purple-600">
+                        {formatHours(hours)}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          session.is_launched 
+                            ? 'bg-green-100 text-green-800' 
+                            : session.is_approved 
+                              ? 'bg-blue-100 text-blue-800'
+                              : session.is_confirmed
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {session.is_launched ? 'Lançado' : 
+                           session.is_approved ? 'Aprovado' : 
+                           session.is_confirmed ? 'Confirmado' : 'Pendente'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex space-x-1">
+                          {!session.is_confirmed && (
+                            <Button
+                              size="sm"
+                              variant="success"
+                              onClick={() => handleConfirmSession(session.id)}
+                              title="Confirmar atendimento"
+                            >
+                              <CheckCircle size={12} />
+                            </Button>
+                          )}
+                          {session.is_confirmed && !session.is_approved && (
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              onClick={() => handleApproveSession(session.id)}
+                              title="Aprovar atendimento"
+                            >
+                              ✓
+                            </Button>
+                          )}
+                          {session.is_approved && !session.is_launched && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleLaunchSession(session.id)}
+                              title="Lançar atendimento"
+                            >
+                              🚀
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+                  </div>
+            {filteredSessions.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                <Calendar className="w-16 h-16 mx-auto text-gray-300 mb-4" />
+                <p>Nenhum atendimento encontrado para o período selecionado</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
       
       <Footer />
     </div>
