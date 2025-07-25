@@ -1,0 +1,1 @@
+// Arquivo removido - dados agora vêm do MySQL via API Flask
